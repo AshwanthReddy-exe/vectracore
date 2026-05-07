@@ -200,4 +200,12 @@ public class VectorStore {
     public synchronized int size() {
         return store.size();
     }
+
+    public synchronized void removeAllByCategory(String category) {
+        List<Integer> toRemove = new ArrayList<>();
+        for (Item item : store.values()) {
+            if (category.equals(item.category)) toRemove.add(item.id);
+        }
+        for (int id : toRemove) remove(id);
+    }
 }

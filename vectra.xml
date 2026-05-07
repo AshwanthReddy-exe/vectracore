@@ -1,0 +1,3658 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+gradle/
+  wrapper/
+    gradle-wrapper.jar
+    gradle-wrapper.properties
+src/
+  main/
+    java/
+      com/
+        vectordb/
+          algorithms/
+            BruteForce.java
+            HNSW.java
+            KDTree.java
+          api/
+            Router.java
+          db/
+            DocumentStore.java
+            VectorStore.java
+          ollama/
+            OllamaClient.java
+          util/
+            FileParser.java
+          VectorDB.java
+    resources/
+      index.html
+.gitignore
+build.gradle.kts
+gradlew
+gradlew.bat
+patch.py
+README.md
+settings.gradle.kts
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="src/main/java/com/vectordb/util/FileParser.java">
+package com.vectordb.util;
+
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
+
+public class FileParser {
+
+    public static String parseText(String text) {
+        return text == null ? "" : text.trim();
+    }
+
+    public static String parsePdf(byte[] pdfBytes) {
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            PDFTextStripper stripper = new PDFTextStripper();
+            return stripper.getText(doc).trim();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to extract PDF text: " + e.getMessage(), e);
+        }
+    }
+}
+</file>
+
+<file path="patch.py">
+import sys
+
+with open('src/main/resources/index.html', 'r') as f:
+    content = f.read()
+
+# 1. ADD CSS
+css_to_add = """  .scatter-panel { flex:1; min-width:380px; position:relative; overflow:hidden; border-right:1px solid var(--border); background:var(--bg); }
+  #scatter { display:block; width:100%; height:100%; }"""
+
+content = content.replace("/* CENTER — LIBRARY + SEARCH */", css_to_add + "\n\n/* CENTER — LIBRARY + SEARCH */")
+
+# 2. ADD HTML
+html_to_add = """  <!-- SCATTER PANEL -->
+  <div class="scatter-panel">
+    <canvas id="scatter"></canvas>
+  </div>
+"""
+
+content = content.replace("  <!-- CENTER — LIBRARY + SEARCH TABS -->", html_to_add + "\n  <!-- CENTER — LIBRARY + SEARCH TABS -->")
+
+
+# 3. Add JS state variables
+js_state = """let allItems = [], pcaPoints = [], hitIds = new Set(), queryPt = null;
+let hoverItem = null, pulse = 0;
+let bounds={minX:-1,maxX:1,minY:-1,maxY:1};
+"""
+
+content = content.replace("let selAlgo = 'hnsw', searchResults = [];", "let selAlgo = 'hnsw', searchResults = [];\n" + js_state)
+
+# 4. Add PCA and canvas functions
+pca_funcs = """
+// PCA AND SCATTER PLOT
+const sc = document.getElementById('scatter'), ctx = sc.getContext('2d');
+
+function pca2D(embs) {
+  const n = embs.length, d = embs[0].length;
+  if (n < 2) return embs.map(() => [0,0]);
+  const mean = new Array(d).fill(0);
+  for (const e of embs) for (let i=0;i<d;i++) mean[i]+=e[i]/n;
+  const X = embs.map(e => e.map((v,i)=>v-mean[i]));
+  function powerIter(X,excl) {
+    let v = new Array(d).fill(0).map(()=>Math.random()-.5);
+    if (excl) { let dot=v.reduce((s,vi,i)=>s+vi*excl[i],0); v=v.map((vi,i)=>vi-dot*excl[i]); }
+    let nrm = Math.sqrt(v.reduce((s,vi)=>s+vi*vi,0));
+    v = v.map(vi=>vi/nrm);
+    for (let it=0;it<200;it++) {
+      const Xv=X.map(xi=>xi.reduce((s,xij,j)=>s+xij*v[j],0));
+      const nv=new Array(d).fill(0);
+      for (let k=0;k<n;k++) for (let j=0;j<d;j++) nv[j]+=X[k][j]*Xv[k];
+      if (excl) { let dot=nv.reduce((s,vi,i)=>s+vi*excl[i],0); for (let i=0;i<d;i++) nv[i]-=dot*excl[i]; }
+      nrm=Math.sqrt(nv.reduce((s,vi)=>s+vi*vi,0));
+      if (nrm<1e-10) break;
+      const prev=v.slice(); v=nv.map(vi=>vi/nrm);
+      if (v.reduce((s,vi,i)=>s+(vi-prev[i])**2,0)<1e-12) break;
+    }
+    return v;
+  }
+  const pc1=powerIter(X,null), pc2=powerIter(X,pc1);
+  return X.map(x=>[x.reduce((s,v,i)=>s+v*pc1[i],0),x.reduce((s,v,i)=>s+v*pc2[i],0)]);
+}
+
+function resize() { const r=sc.parentElement.getBoundingClientRect(); sc.width=r.width; sc.height=r.height; }
+window.addEventListener('resize', resize);
+
+function w2c(wx,wy) {
+  const P=70,W=sc.width,H=sc.height,rx=bounds.maxX-bounds.minX||1,ry=bounds.maxY-bounds.minY||1;
+  return [P+((wx-bounds.minX)/rx)*(W-2*P), H-P-((wy-bounds.minY)/ry)*(H-2*P)];
+}
+
+function drawFrame() {
+  ctx.clearRect(0,0,sc.width,sc.height);
+  ctx.fillStyle='#07070f'; ctx.fillRect(0,0,sc.width,sc.height);
+  ctx.strokeStyle='#0e0e1e'; ctx.lineWidth=1;
+  for (let i=0;i<=8;i++) {
+    const tx=70+(i/8)*(sc.width-140),ty=70+(i/8)*(sc.height-140);
+    ctx.beginPath();ctx.moveTo(tx,70);ctx.lineTo(tx,sc.height-70);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(70,ty);ctx.lineTo(sc.width-70,ty);ctx.stroke();
+  }
+  ctx.fillStyle='#1a1a38'; ctx.font='11px Fira Code,monospace';
+  ctx.fillText('PC₁ →',sc.width/2-40,sc.height-18);
+  ctx.save();ctx.translate(18,sc.height/2+50);ctx.rotate(-Math.PI/2);ctx.fillText('PC₂ →',0,0);ctx.restore();
+  ctx.fillStyle='#151530'; ctx.font='12px Fira Code,monospace';
+  ctx.fillText('2D PCA Projection  ·  Semantic Space',80,28);
+
+  if (queryPt && hitIds.size>0) {
+    const [qx,qy]=w2c(queryPt.x,queryPt.y);
+    for (const pt of pcaPoints) {
+      if (!hitIds.has(pt.item.id)) continue;
+      const [px,py]=w2c(pt.x,pt.y);
+      ctx.strokeStyle='rgba(108,99,255,0.18)'; ctx.lineWidth=1; ctx.setLineDash([4,4]);
+      ctx.beginPath();ctx.moveTo(qx,qy);ctx.lineTo(px,py);ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+  for (const pt of pcaPoints) {
+    const [cx,cy]=w2c(pt.x,pt.y);
+    const col=COL[pt.item.category]||COL.default;
+    const isHit=hitIds.has(pt.item.id), r=isHit?10:7;
+    if (isHit) {
+      const pr=r+7+Math.sin(pulse)*3.5;
+      ctx.beginPath();ctx.arc(cx,cy,pr,0,2*Math.PI);
+      ctx.strokeStyle=col+'55';ctx.lineWidth=1.5;ctx.stroke();
+    }
+    const grd=ctx.createRadialGradient(cx,cy,0,cx,cy,r*3);
+    grd.addColorStop(0,col+(isHit?'bb':'88'));grd.addColorStop(1,'transparent');
+    ctx.beginPath();ctx.arc(cx,cy,r*3,0,2*Math.PI);ctx.fillStyle=grd;ctx.fill();
+    ctx.beginPath();ctx.arc(cx,cy,r,0,2*Math.PI);ctx.fillStyle=col;ctx.fill();
+    if (hoverItem&&hoverItem.id===pt.item.id) {
+      ctx.beginPath();ctx.arc(cx,cy,r+5,0,2*Math.PI);ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.stroke();
+    }
+  }
+  if (queryPt) {
+    const [qx,qy]=w2c(queryPt.x,queryPt.y);
+    ctx.save();ctx.translate(qx,qy);
+    ctx.shadowColor='#fff';ctx.shadowBlur=18;
+    ctx.beginPath();
+    for (let i=0;i<10;i++){const a=(i*Math.PI/5)-Math.PI/2,rr=i%2===0?13:5;if(i===0)ctx.moveTo(Math.cos(a)*rr,Math.sin(a)*rr);else ctx.lineTo(Math.cos(a)*rr,Math.sin(a)*rr);}
+    ctx.closePath();ctx.fillStyle='#fff';ctx.fill();
+    ctx.shadowBlur=0;ctx.restore();
+    ctx.fillStyle='#aaaacc';ctx.font='10px Fira Code,monospace';ctx.fillText('query',qx+16,qy+4);
+  }
+  if (!pcaPoints.length) {
+    ctx.fillStyle='#1a1a38';ctx.font='13px Fira Code,monospace';ctx.textAlign='center';
+    ctx.fillText('Connecting to VectorDB…',sc.width/2,sc.height/2);ctx.textAlign='left';
+  }
+  pulse+=0.05;
+  requestAnimationFrame(drawFrame);
+}
+
+sc.addEventListener('mousemove', e => {
+  const rect=sc.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  hoverItem=null; let best=18;
+  for (const pt of pcaPoints) {
+    const [cx,cy]=w2c(pt.x,pt.y),d=Math.hypot(mx-cx,my-cy);
+    if (d<best){best=d;hoverItem=pt.item;}
+  }
+  const tip=document.getElementById('tip');
+  if (hoverItem) {
+    const col=COL[hoverItem.category]||COL.default;
+    tip.style.display='block';tip.style.left=(e.clientX+14)+'px';tip.style.top=(e.clientY-8)+'px';
+    tip.innerHTML=`<span style="color:${col}">[${hoverItem.category.toUpperCase()}]</span><br>${hoverItem.metadata}`;
+  } else tip.style.display='none';
+});
+sc.addEventListener('mouseleave',()=>{hoverItem=null;document.getElementById('tip').style.display='none';});
+
+async function loadItems() {
+  try {
+    const r = await fetch(API+'/items');
+    allItems = await r.json();
+    if (allItems.length >= 2) {
+      const coords = pca2D(allItems.map(v=>v.embedding));
+      pcaPoints = allItems.map((item,i)=>({x:coords[i][0],y:coords[i][1],item}));
+      let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+      for (const p of pcaPoints){x0=Math.min(x0,p.x);x1=Math.max(x1,p.x);y0=Math.min(y0,p.y);y1=Math.max(y1,p.y);}
+      const px=(x1-x0)*.18||.1,py=(y1-y0)*.18||.1;
+      bounds={minX:x0-px,maxX:x1+px,minY:y0-py,maxY:y1+py};
+    }
+  } catch(_) {}
+}
+"""
+
+content = content.replace("// CENTER TAB SWITCH", pca_funcs + "\n// CENTER TAB SWITCH")
+
+
+# 5. Modify runSearch
+runsearch_old = """    const r = await fetch(`${API}/search?v=${emb.join(',')}&k=${k}&metric=${metric}&algo=${selAlgo}`);
+    const data = await r.json();
+    searchResults = data.results||[];"""
+
+runsearch_new = """    const r = await fetch(`${API}/search?v=${emb.join(',')}&k=${k}&metric=${metric}&algo=${selAlgo}`);
+    const data = await r.json();
+    searchResults = data.results||[];
+    hitIds = new Set(searchResults.map(r=>r.id));
+    if (searchResults.length>0){
+      let sx=0,sy=0,sw=0;
+      for (let i=0;i<Math.min(3,searchResults.length);i++){
+        const pt=pcaPoints.find(p=>p.item.id===searchResults[i].id);
+        if(pt){const w=1/(i+1);sx+=pt.x*w;sy+=pt.y*w;sw+=w;}
+      }
+      if(sw>0)queryPt={x:sx/sw+(Math.random()-.5)*.015,y:sy/sw+(Math.random()-.5)*.015};
+    }"""
+content = content.replace(runsearch_old, runsearch_new)
+
+# Modify askAI
+askAI_old = """  try {
+    const r = await fetch(API+'/doc/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question,k})});"""
+
+askAI_new = """  // Update the scatter plot visualizer in the background
+  fetch(API+'/doc/search', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({question, k})
+  })
+  .then(res=>res.json())
+  .then(data => {
+    if (data.contexts && data.contexts.length > 0) {
+      hitIds = new Set();
+      let sx=0, sy=0, sw=0;
+      data.contexts.forEach((ctx, i) => {
+        // Match the RAG chunk title back to the visualizer document metadata
+        const pt = pcaPoints.find(p => p.item.category === 'doc' && ctx.title.startsWith(p.item.metadata));
+        if (pt) {
+          hitIds.add(pt.item.id);
+          const w = 1/(i+1); sx += pt.x*w; sy += pt.y*w; sw += w;
+        }
+      });
+      if (sw > 0) queryPt = {x: sx/sw + (Math.random()-.5)*.015, y: sy/sw + (Math.random()-.5)*.015};
+    } else {
+      hitIds = new Set();
+      const emb16 = textToEmbedding(question);
+      fetch(`${API}/search?v=${emb16.join(',')}&k=3&metric=cosine&algo=hnsw`)
+        .then(res2=>res2.json())
+        .then(data2 => {
+          if (data2.results && data2.results.length>0) {
+            let sx=0,sy=0,sw=0;
+            for (let i=0;i<Math.min(3,data2.results.length);i++) {
+              const pt=pcaPoints.find(p=>p.item.id===data2.results[i].id);
+              if(pt){const w=1/(i+1);sx+=pt.x*w;sy+=pt.y*w;sw+=w;}
+            }
+            if(sw>0) queryPt={x:sx/sw+(Math.random()-.5)*.015,y:sy/sw+(Math.random()-.5)*.015};
+          }
+        }).catch(()=>{});
+    }
+  }).catch(()=>{});
+
+  try {
+    const r = await fetch(API+'/doc/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question,k})});"""
+
+content = content.replace(askAI_old, askAI_new)
+
+
+# Update addVector
+content = content.replace("document.getElementById('addMeta').value='';\n    loadHNSW(); loadStats();", "document.getElementById('addMeta').value='';\n    loadItems().then(loadHNSW); loadStats();")
+
+# Update insertDocument
+content = content.replace("      document.getElementById('docText').value='';\n      loadDocList(); loadStats(); checkOllamaStatus();", "      document.getElementById('docText').value='';\n      const emb16 = textToEmbedding(title + ' ' + text);\n      fetch(API+'/insert', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({metadata: title, category: 'doc', embedding: emb16}) }).then(() => { loadItems().then(loadHNSW); });\n      loadDocList(); loadStats(); checkOllamaStatus();")
+
+# Update uploadFile
+content = content.replace("      setTimeout(() => statusEl.classList.remove('show'), 3000);\n      loadDocList(); loadStats(); loadHNSW();", "      setTimeout(() => statusEl.classList.remove('show'), 3000);\n      loadDocList(); loadStats(); loadItems().then(loadHNSW);")
+
+
+# Modify BOOT section
+boot_old = """// BOOT
+checkOllamaStatus();
+loadDocList();
+loadStats();
+loadHNSW();"""
+
+boot_new = """// BOOT
+resize();
+drawFrame();
+loadItems().then(loadHNSW);
+checkOllamaStatus();
+loadDocList();
+loadStats();"""
+
+content = content.replace(boot_old, boot_new)
+
+
+with open('src/main/resources/index.html', 'w') as f:
+    f.write(content)
+</file>
+
+<file path="gradle/wrapper/gradle-wrapper.properties">
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.7-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+</file>
+
+<file path="src/main/java/com/vectordb/algorithms/BruteForce.java">
+package com.vectordb.algorithms;
+
+import java.util.*;
+import java.util.function.BiFunction;
+
+/**
+ * Brute Force k-Nearest Neighbor search.
+ * Linear scan over all stored vectors, O(n*d) per query.
+ */
+public class BruteForce {
+
+    public static class Item {
+        public final int id;
+        public final String metadata;
+        public final String category;
+        public final float[] embedding;
+
+        public Item(int id, String metadata, String category, float[] embedding) {
+            this.id = id;
+            this.metadata = metadata;
+            this.category = category;
+            this.embedding = embedding;
+        }
+    }
+
+    private final List<Item> items = new ArrayList<>();
+
+    public synchronized void insert(Item item) {
+        items.add(item);
+    }
+
+    /**
+     * Returns top-k results as (distance, id) pairs, sorted ascending by distance.
+     */
+    public synchronized List<float[]> knn(float[] query, int k, BiFunction<float[], float[], Float> dist) {
+        List<float[]> results = new ArrayList<>(items.size());
+        for (Item item : items) {
+            float d = dist.apply(query, item.embedding);
+            results.add(new float[]{d, item.id});
+        }
+        results.sort(Comparator.comparingDouble(a -> a[0]));
+        if (results.size() > k) results = results.subList(0, k);
+        return new ArrayList<>(results);
+    }
+
+    public synchronized void remove(int id) {
+        items.removeIf(item -> item.id == id);
+    }
+
+    public synchronized List<Item> all() {
+        return new ArrayList<>(items);
+    }
+
+    public synchronized int size() {
+        return items.size();
+    }
+}
+</file>
+
+<file path="src/main/java/com/vectordb/algorithms/HNSW.java">
+package com.vectordb.algorithms;
+
+import java.util.*;
+import java.util.function.BiFunction;
+
+/**
+ * Hierarchical Navigable Small World (HNSW) graph index.
+ *
+ * Parameters:
+ *   M             = 16  (max connections per node per layer, except layer 0 uses M0=2*M)
+ *   ef_construction = 200
+ *   mL            = 1 / ln(M)   (level generation normalization)
+ *
+ * Supports cosine, euclidean, and manhattan distance metrics.
+ */
+public class HNSW {
+
+    // ── Internal node representation ───────────────────────────────────
+
+    public static class Node {
+        public final int id;
+        public final String metadata;
+        public final String category;
+        public final float[] embedding;
+        public final int maxLayer;
+        // neighbors[layer] = list of neighbor IDs at that layer
+        public final List<List<Integer>> neighbors;
+
+        public Node(int id, String metadata, String category, float[] embedding, int maxLayer) {
+            this.id = id;
+            this.metadata = metadata;
+            this.category = category;
+            this.embedding = embedding;
+            this.maxLayer = maxLayer;
+            this.neighbors = new ArrayList<>();
+            for (int i = 0; i <= maxLayer; i++) {
+                this.neighbors.add(new ArrayList<>());
+            }
+        }
+    }
+
+    // ── Graph state ─────────────────────────────────────────────────────
+
+    private final Map<Integer, Node> graph = new HashMap<>();
+    private final int M;
+    private final int M0;
+    private final int efConstruction;
+    private final double mL;
+    private int topLayer = -1;
+    private int entryPoint = -1;
+    private final Random rng = new Random(42);
+
+    public HNSW(int m, int efConstruction) {
+        this.M = m;
+        this.M0 = 2 * m;
+        this.efConstruction = efConstruction;
+        this.mL = 1.0 / Math.log(m);
+    }
+
+    // ── Level generation ────────────────────────────────────────────────
+
+    private int randomLevel() {
+        double r = rng.nextDouble();
+        if (r <= 0.0) r = 1e-10;
+        return (int) Math.floor(-Math.log(r) * mL);
+    }
+
+    // ── Layer search (beam search) ──────────────────────────────────────
+
+    /**
+     * Searches a single layer starting from ep, returning up to ef results
+     * sorted ascending by distance (closest first).
+     */
+    private List<float[]> searchLayer(float[] query, int ep, int ef, int layer,
+                                       BiFunction<float[], float[], Float> dist) {
+        Set<Integer> visited = new HashSet<>();
+        // candidates min-heap (closest at top)
+        PriorityQueue<float[]> candidates = new PriorityQueue<>(Comparator.comparingDouble(a -> a[0]));
+        // found max-heap (farthest at top, for pruning)
+        PriorityQueue<float[]> found = new PriorityQueue<>((a, b) -> Float.compare(b[0], a[0]));
+
+        float d0 = dist.apply(query, graph.get(ep).embedding);
+        visited.add(ep);
+        candidates.offer(new float[]{d0, ep});
+        found.offer(new float[]{d0, ep});
+
+        while (!candidates.isEmpty()) {
+            float[] current = candidates.poll();
+            float cd = current[0];
+            int cid = (int) current[1];
+
+            if (found.size() >= ef && cd > found.peek()[0]) break;
+
+            Node cNode = graph.get(cid);
+            if (cNode == null || layer >= cNode.neighbors.size()) continue;
+
+            for (int nid : cNode.neighbors.get(layer)) {
+                if (visited.contains(nid) || !graph.containsKey(nid)) continue;
+                visited.add(nid);
+                float nd = dist.apply(query, graph.get(nid).embedding);
+                if (found.size() < ef || nd < found.peek()[0]) {
+                    candidates.offer(new float[]{nd, nid});
+                    found.offer(new float[]{nd, nid});
+                    if (found.size() > ef) found.poll();
+                }
+            }
+        }
+
+        List<float[]> result = new ArrayList<>(found);
+        result.sort(Comparator.comparingDouble(a -> a[0]));
+        return result;
+    }
+
+    // ── Select neighbors (simple greedy, matches C++ selectNbrs) ────────
+
+    private List<Integer> selectNeighbors(List<float[]> candidates, int maxM) {
+        List<Integer> result = new ArrayList<>();
+        for (int i = 0; i < Math.min(candidates.size(), maxM); i++) {
+            result.add((int) candidates.get(i)[1]);
+        }
+        return result;
+    }
+
+    // ── Insert ──────────────────────────────────────────────────────────
+
+    public synchronized void insert(int id, String metadata, String category, float[] embedding,
+                                    BiFunction<float[], float[], Float> dist) {
+        int level = randomLevel();
+        Node node = new Node(id, metadata, category, embedding, level);
+        graph.put(id, node);
+
+        if (entryPoint == -1) {
+            entryPoint = id;
+            topLayer = level;
+            return;
+        }
+
+        int ep = entryPoint;
+
+        // Greedy descent from topLayer down to level+1
+        for (int lc = topLayer; lc > level; lc--) {
+            Node epNode = graph.get(ep);
+            if (epNode != null && lc < epNode.neighbors.size()) {
+                List<float[]> w = searchLayer(embedding, ep, 1, lc, dist);
+                if (!w.isEmpty()) ep = (int) w.get(0)[1];
+            }
+        }
+
+        // Insert at each layer from min(topLayer,level) down to 0
+        for (int lc = Math.min(topLayer, level); lc >= 0; lc--) {
+            List<float[]> w = searchLayer(embedding, ep, efConstruction, lc, dist);
+            int maxM = (lc == 0) ? M0 : M;
+            List<Integer> selected = selectNeighbors(w, maxM);
+
+            node.neighbors.get(lc).addAll(selected);
+
+            // Connect bidirectionally and prune
+            for (int nid : selected) {
+                Node nNode = graph.get(nid);
+                if (nNode == null) continue;
+                while (nNode.neighbors.size() <= lc) nNode.neighbors.add(new ArrayList<>());
+                List<Integer> conn = nNode.neighbors.get(lc);
+                conn.add(id);
+
+                if (conn.size() > maxM) {
+                    // Prune to maxM using distances
+                    List<float[]> ds = new ArrayList<>();
+                    for (int c : conn) {
+                        Node cn = graph.get(c);
+                        if (cn != null) {
+                            ds.add(new float[]{dist.apply(nNode.embedding, cn.embedding), c});
+                        }
+                    }
+                    ds.sort(Comparator.comparingDouble(a -> a[0]));
+                    conn.clear();
+                    for (int i = 0; i < Math.min(maxM, ds.size()); i++) {
+                        conn.add((int) ds.get(i)[1]);
+                    }
+                }
+            }
+
+            if (!w.isEmpty()) ep = (int) w.get(0)[1];
+        }
+
+        if (level > topLayer) {
+            topLayer = level;
+            entryPoint = id;
+        }
+    }
+
+    // ── Search ──────────────────────────────────────────────────────────
+
+    public synchronized List<float[]> knn(float[] query, int k, int ef,
+                                           BiFunction<float[], float[], Float> dist) {
+        if (entryPoint == -1) return Collections.emptyList();
+
+        int ep = entryPoint;
+        for (int lc = topLayer; lc > 0; lc--) {
+            Node epNode = graph.get(ep);
+            if (epNode != null && lc < epNode.neighbors.size()) {
+                List<float[]> w = searchLayer(query, ep, 1, lc, dist);
+                if (!w.isEmpty()) ep = (int) w.get(0)[1];
+            }
+        }
+
+        List<float[]> w = searchLayer(query, ep, Math.max(ef, k), 0, dist);
+        if (w.size() > k) w = w.subList(0, k);
+        return new ArrayList<>(w);
+    }
+
+    // ── Remove ──────────────────────────────────────────────────────────
+
+    public synchronized void remove(int id) {
+        if (!graph.containsKey(id)) return;
+
+        for (Node node : graph.values()) {
+            for (List<Integer> layer : node.neighbors) {
+                layer.removeIf(nid -> nid == id);
+            }
+        }
+
+        if (entryPoint == id) {
+            entryPoint = -1;
+            for (int nid : graph.keySet()) {
+                if (nid != id) {
+                    entryPoint = nid;
+                    break;
+                }
+            }
+        }
+
+        graph.remove(id);
+    }
+
+    // ── Graph info (for /hnsw-info endpoint) ────────────────────────────
+
+    public static class GraphInfo {
+        public int topLayer;
+        public int nodeCount;
+        public int[] nodesPerLayer;
+        public int[] edgesPerLayer;
+
+        public static class NodeView {
+            public int id;
+            public String metadata;
+            public String category;
+            public int maxLayer;
+
+            public NodeView(int id, String metadata, String category, int maxLayer) {
+                this.id = id;
+                this.metadata = metadata;
+                this.category = category;
+                this.maxLayer = maxLayer;
+            }
+        }
+
+        public static class EdgeView {
+            public int src, dst, layer;
+
+            public EdgeView(int src, int dst, int layer) {
+                this.src = src;
+                this.dst = dst;
+                this.layer = layer;
+            }
+        }
+
+        public List<NodeView> nodes = new ArrayList<>();
+        public List<EdgeView> edges = new ArrayList<>();
+    }
+
+    public synchronized GraphInfo getInfo() {
+        GraphInfo gi = new GraphInfo();
+        gi.topLayer  = topLayer;
+        gi.nodeCount = graph.size();
+        int maxL = Math.max(topLayer + 1, 1);
+        gi.nodesPerLayer = new int[maxL];
+        gi.edgesPerLayer = new int[maxL];
+
+        for (Map.Entry<Integer, Node> entry : graph.entrySet()) {
+            int id   = entry.getKey();
+            Node nd  = entry.getValue();
+            gi.nodes.add(new GraphInfo.NodeView(id, nd.metadata, nd.category, nd.maxLayer));
+
+            for (int lc = 0; lc <= nd.maxLayer && lc < maxL; lc++) {
+                gi.nodesPerLayer[lc]++;
+                if (lc < nd.neighbors.size()) {
+                    for (int nid : nd.neighbors.get(lc)) {
+                        if (id < nid) {
+                            gi.edgesPerLayer[lc]++;
+                            gi.edges.add(new GraphInfo.EdgeView(id, nid, lc));
+                        }
+                    }
+                }
+            }
+        }
+
+        return gi;
+    }
+
+    public synchronized int size() {
+        return graph.size();
+    }
+}
+</file>
+
+<file path="src/main/java/com/vectordb/algorithms/KDTree.java">
+package com.vectordb.algorithms;
+
+import java.util.*;
+import java.util.function.BiFunction;
+
+/**
+ * KD-Tree for k-Nearest Neighbor search.
+ * Cycles through axes by depth % dims, with ball-within-hyperslab pruning.
+ * Supports cosine, euclidean, and manhattan distance metrics.
+ */
+public class KDTree {
+
+    private static class KDNode {
+        final int id;
+        final String metadata;
+        final String category;
+        final float[] embedding;
+        KDNode left, right;
+
+        KDNode(int id, String metadata, String category, float[] embedding) {
+            this.id = id;
+            this.metadata = metadata;
+            this.category = category;
+            this.embedding = embedding;
+        }
+    }
+
+    private KDNode root = null;
+    private final int dims;
+
+    public KDTree(int dims) {
+        this.dims = dims;
+    }
+
+    public synchronized void insert(int id, String metadata, String category, float[] embedding) {
+        root = insert(root, id, metadata, category, embedding, 0);
+    }
+
+    private KDNode insert(KDNode node, int id, String metadata, String category, float[] embedding, int depth) {
+        if (node == null) return new KDNode(id, metadata, category, embedding);
+        int axis = depth % dims;
+        if (embedding[axis] < node.embedding[axis]) {
+            node.left = insert(node.left, id, metadata, category, embedding, depth + 1);
+        } else {
+            node.right = insert(node.right, id, metadata, category, embedding, depth + 1);
+        }
+        return node;
+    }
+
+    /**
+     * Returns top-k results as (distance, id) pairs sorted ascending by distance.
+     */
+    public synchronized List<float[]> knn(float[] query, int k, BiFunction<float[], float[], Float> dist) {
+        // Max-heap: largest distance at top (we keep only k best)
+        PriorityQueue<float[]> heap = new PriorityQueue<>(
+            (a, b) -> Float.compare(b[0], a[0])
+        );
+        knnSearch(root, query, k, 0, dist, heap);
+        List<float[]> result = new ArrayList<>(heap);
+        result.sort(Comparator.comparingDouble(a -> a[0]));
+        return result;
+    }
+
+    private void knnSearch(KDNode node, float[] query, int k, int depth,
+                           BiFunction<float[], float[], Float> dist,
+                           PriorityQueue<float[]> heap) {
+        if (node == null) return;
+
+        float dn = dist.apply(query, node.embedding);
+        if (heap.size() < k || dn < heap.peek()[0]) {
+            heap.offer(new float[]{dn, node.id});
+            if (heap.size() > k) heap.poll();
+        }
+
+        int axis = depth % dims;
+        float diff = query[axis] - node.embedding[axis];
+        KDNode closer  = diff < 0 ? node.left  : node.right;
+        KDNode farther = diff < 0 ? node.right : node.left;
+
+        knnSearch(closer, query, k, depth + 1, dist, heap);
+
+        // Pruning: only visit farther branch if it can possibly contain closer points
+        if (heap.size() < k || Math.abs(diff) < heap.peek()[0]) {
+            knnSearch(farther, query, k, depth + 1, dist, heap);
+        }
+    }
+
+    public synchronized void rebuild(List<BruteForce.Item> items) {
+        root = null;
+        for (BruteForce.Item item : items) {
+            insert(item.id, item.metadata, item.category, item.embedding);
+        }
+    }
+}
+</file>
+
+<file path="src/main/java/com/vectordb/api/Router.java">
+package com.vectordb.api;
+
+import com.google.gson.*;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import com.vectordb.algorithms.HNSW;
+import com.vectordb.db.DocumentStore;
+import com.vectordb.db.VectorStore;
+import com.vectordb.ollama.OllamaClient;
+
+import java.io.*;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.function.BiFunction;
+
+/**
+ * REST API router — all endpoint handlers wired to the HttpServer.
+ *
+ * Endpoints:
+ *   GET  /                   serve index.html
+ *   GET  /search             k-NN search on demo vectors
+ *   POST /insert             insert a demo vector
+ *   DELETE /delete/:id       remove a demo vector
+ *   GET  /items              list all demo vectors
+ *   GET  /benchmark          run all 3 algos, compare timings
+ *   GET  /hnsw-info          HNSW layer statistics
+ *   GET  /stats              basic DB statistics
+ *   POST /doc/insert         chunk+embed+store a document
+ *   GET  /doc/list           list stored document chunks
+ *   DELETE /doc/delete/:id   remove a document chunk
+ *   POST /doc/ask            RAG pipeline (embed→retrieve→generate)
+ *   GET  /status             Ollama online/offline + model names
+ */
+public class Router {
+
+    private final VectorStore    vdb;
+    private final DocumentStore  docDB;
+    private final OllamaClient   ollama;
+    private final Gson           gson = new GsonBuilder().serializeSpecialFloatingPointValues().create();
+
+    // Cache index.html bytes at startup
+    private byte[] indexHtml;
+
+    public Router(VectorStore vdb, DocumentStore docDB, OllamaClient ollama) {
+        this.vdb    = vdb;
+        this.docDB  = docDB;
+        this.ollama = ollama;
+        loadIndexHtml();
+    }
+
+    // ── Register all routes ──────────────────────────────────────────────
+
+    public void register(HttpServer server) {
+        server.createContext("/",            this::handleRoot);
+        server.createContext("/search",      this::handleSearch);
+        server.createContext("/insert",      this::handleInsert);
+        server.createContext("/delete",      this::handleDelete);
+        server.createContext("/items",       this::handleItems);
+        server.createContext("/benchmark",   this::handleBenchmark);
+        server.createContext("/hnsw-info",   this::handleHnswInfo);
+        server.createContext("/stats",       this::handleStats);
+        server.createContext("/doc/insert",  this::handleDocInsert);
+        server.createContext("/doc/list",    this::handleDocList);
+        server.createContext("/doc/delete",  this::handleDocDelete);
+        server.createContext("/doc/ask",     this::handleDocAsk);
+        server.createContext("/doc/upload",     this::handleDocUpload);
+        server.createContext("/doc/delete/all", this::handleDocDeleteAll);
+        server.createContext("/status",      this::handleStatus);
+    }
+
+    // ── Utility helpers ──────────────────────────────────────────────────
+
+    private void addCors(HttpExchange ex) {
+        ex.getResponseHeaders().add("Access-Control-Allow-Origin",  "*");
+        ex.getResponseHeaders().add("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+        ex.getResponseHeaders().add("Access-Control-Allow-Headers", "Content-Type");
+    }
+
+    private void sendJson(HttpExchange ex, int status, String json) throws IOException {
+        addCors(ex);
+        byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+        ex.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+        ex.sendResponseHeaders(status, bytes.length);
+        try (OutputStream os = ex.getResponseBody()) { os.write(bytes); }
+    }
+
+    private void sendError(HttpExchange ex, String msg) throws IOException {
+        JsonObject obj = new JsonObject();
+        obj.addProperty("error", msg);
+        sendJson(ex, 400, gson.toJson(obj));
+    }
+
+    private String readBody(HttpExchange ex) throws IOException {
+        try (InputStream is = ex.getRequestBody()) {
+            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    /** Parse ?v=1.0,2.0,... from query string */
+    private float[] parseVec(String raw) {
+        if (raw == null || raw.isBlank()) return new float[0];
+        String[] parts = raw.split(",");
+        float[] v = new float[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            try { v[i] = Float.parseFloat(parts[i].trim()); }
+            catch (NumberFormatException e) { return new float[0]; }
+        }
+        return v;
+    }
+
+    /** Parse a query string like k=5&metric=cosine&algo=hnsw */
+    private Map<String, String> parseQuery(URI uri) {
+        Map<String, String> params = new HashMap<>();
+        String query = uri.getRawQuery();
+        if (query == null || query.isBlank()) return params;
+        for (String pair : query.split("&")) {
+            int eq = pair.indexOf('=');
+            if (eq > 0) {
+                String key = java.net.URLDecoder.decode(pair.substring(0, eq), StandardCharsets.UTF_8);
+                String val = java.net.URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+                params.put(key, val);
+            }
+        }
+        return params;
+    }
+
+    /** Extract last path segment as integer (e.g. /delete/42 → 42) */
+    private int parseIdFromPath(String path) {
+        String[] parts = path.split("/");
+        return Integer.parseInt(parts[parts.length - 1]);
+    }
+
+    private float[] parseVecFromJson(JsonObject obj, String key) {
+        if (!obj.has(key)) return new float[0];
+        JsonArray arr = obj.getAsJsonArray(key);
+        float[] v = new float[arr.size()];
+        for (int i = 0; i < arr.size(); i++) v[i] = arr.get(i).getAsFloat();
+        return v;
+    }
+
+    private String vecToJsonArray(float[] v) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < v.length; i++) {
+            if (i > 0) sb.append(',');
+            sb.append(String.format("%.4f", v[i]));
+        }
+        return sb.append(']').toString();
+    }
+
+    private void loadIndexHtml() {
+        try (InputStream is = getClass().getResourceAsStream("/index.html")) {
+            if (is != null) indexHtml = is.readAllBytes();
+        } catch (IOException e) {
+            System.err.println("[WARN] Could not load index.html from resources: " + e.getMessage());
+        }
+    }
+
+    // ── Handlers ─────────────────────────────────────────────────────────
+
+    // GET /  → serve index.html
+    private void handleRoot(HttpExchange ex) throws IOException {
+        // Handle CORS preflight
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            addCors(ex);
+            ex.sendResponseHeaders(204, -1);
+            return;
+        }
+        String path = ex.getRequestURI().getPath();
+        // Only serve root; let other registered contexts handle their paths
+        if (!"/".equals(path)) {
+            ex.sendResponseHeaders(404, -1);
+            return;
+        }
+        if (indexHtml == null) {
+            String notFound = "index.html not found";
+            ex.getResponseHeaders().set("Content-Type", "text/plain");
+            ex.sendResponseHeaders(404, notFound.length());
+            ex.getResponseBody().write(notFound.getBytes());
+            ex.getResponseBody().close();
+            return;
+        }
+        ex.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+        ex.sendResponseHeaders(200, indexHtml.length);
+        try (OutputStream os = ex.getResponseBody()) { os.write(indexHtml); }
+    }
+
+    // GET /search?v=...&k=5&metric=cosine&algo=hnsw
+    private void handleSearch(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        Map<String, String> params = parseQuery(ex.getRequestURI());
+        float[] q = parseVec(params.get("v"));
+        if (q.length != vdb.dims) {
+            sendError(ex, "need " + vdb.dims + "D vector"); return;
+        }
+        int k = 5;
+        try { k = Integer.parseInt(params.getOrDefault("k", "5")); } catch (NumberFormatException ignored) {}
+        String metric = params.getOrDefault("metric", "cosine");
+        String algo   = params.getOrDefault("algo",   "hnsw");
+
+        VectorStore.SearchResult out = vdb.search(q, k, metric, algo);
+
+        StringBuilder sb = new StringBuilder("{\"results\":[");
+        for (int i = 0; i < out.hits.size(); i++) {
+            if (i > 0) sb.append(',');
+            VectorStore.Hit h = out.hits.get(i);
+            sb.append("{\"id\":").append(h.id)
+              .append(",\"metadata\":").append(jsonStr(h.metadata))
+              .append(",\"category\":").append(jsonStr(h.category))
+              .append(",\"distance\":").append(String.format("%.6f", h.distance))
+              .append(",\"embedding\":").append(vecToJsonArray(h.embedding))
+              .append('}');
+        }
+        sb.append("],\"latencyUs\":").append(out.latencyUs)
+          .append(",\"algo\":").append(jsonStr(out.algo))
+          .append(",\"metric\":").append(jsonStr(out.metric))
+          .append('}');
+
+        sendJson(ex, 200, sb.toString());
+    }
+
+    // POST /insert  body: {id, label, category, vec:[...]}
+    // Also accepts: {metadata, category, embedding:[...]}
+    private void handleInsert(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendError(ex, "POST required"); return;
+        }
+        String body = readBody(ex);
+        try {
+            JsonObject obj = JsonParser.parseString(body).getAsJsonObject();
+            // Support both "metadata"/"label" and "embedding"/"vec"
+            String meta = obj.has("metadata") ? obj.get("metadata").getAsString()
+                        : obj.has("label")    ? obj.get("label").getAsString()
+                        : "";
+            String cat  = obj.has("category") ? obj.get("category").getAsString() : "";
+            float[] emb = parseVecFromJson(obj, "embedding");
+            if (emb.length == 0) emb = parseVecFromJson(obj, "vec");
+
+            if (meta.isBlank() || emb.length != vdb.dims) {
+                sendError(ex, "invalid body — need metadata/label + " + vdb.dims + "D embedding/vec"); return;
+            }
+            int id = vdb.insert(meta, cat, emb, VectorStore.getDistFn("cosine"));
+            sendJson(ex, 200, "{\"id\":" + id + "}");
+        } catch (Exception e) {
+            sendError(ex, "invalid JSON: " + e.getMessage());
+        }
+    }
+
+    // DELETE /delete/:id
+    private void handleDelete(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        if (!"DELETE".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendError(ex, "DELETE required"); return;
+        }
+        try {
+            int id  = parseIdFromPath(ex.getRequestURI().getPath());
+            boolean ok = vdb.remove(id);
+            sendJson(ex, 200, "{\"ok\":" + ok + "}");
+        } catch (NumberFormatException e) {
+            sendError(ex, "invalid id");
+        }
+    }
+
+    // GET /items
+    private void handleItems(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        List<VectorStore.Item> items = vdb.all();
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) sb.append(',');
+            VectorStore.Item v = items.get(i);
+            sb.append("{\"id\":").append(v.id)
+              .append(",\"metadata\":").append(jsonStr(v.metadata))
+              .append(",\"category\":").append(jsonStr(v.category))
+              .append(",\"embedding\":").append(vecToJsonArray(v.embedding))
+              .append('}');
+        }
+        sb.append(']');
+        sendJson(ex, 200, sb.toString());
+    }
+
+    // GET /benchmark?v=...&k=5&metric=cosine
+    private void handleBenchmark(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        Map<String, String> params = parseQuery(ex.getRequestURI());
+        float[] q = parseVec(params.get("v"));
+        if (q.length != vdb.dims) {
+            sendError(ex, "need " + vdb.dims + "D vector"); return;
+        }
+        int k = 5;
+        try { k = Integer.parseInt(params.getOrDefault("k", "5")); } catch (NumberFormatException ignored) {}
+        String metric = params.getOrDefault("metric", "cosine");
+
+        VectorStore.BenchResult b = vdb.benchmark(q, k, metric);
+        String json = "{\"bruteforceUs\":" + b.bruteforceUs
+                    + ",\"kdtreeUs\":"     + b.kdtreeUs
+                    + ",\"hnswUs\":"       + b.hnswUs
+                    + ",\"itemCount\":"    + b.itemCount + "}";
+        sendJson(ex, 200, json);
+    }
+
+    // GET /hnsw-info
+    private void handleHnswInfo(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        HNSW.GraphInfo gi = vdb.hnswInfo();
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"topLayer\":").append(gi.topLayer)
+          .append(",\"nodeCount\":").append(gi.nodeCount)
+          .append(",\"nodesPerLayer\":[");
+        for (int i = 0; i < gi.nodesPerLayer.length; i++) {
+            if (i > 0) sb.append(','); sb.append(gi.nodesPerLayer[i]);
+        }
+        sb.append("],\"edgesPerLayer\":[");
+        for (int i = 0; i < gi.edgesPerLayer.length; i++) {
+            if (i > 0) sb.append(','); sb.append(gi.edgesPerLayer[i]);
+        }
+        sb.append("],\"nodes\":[");
+        for (int i = 0; i < gi.nodes.size(); i++) {
+            if (i > 0) sb.append(',');
+            HNSW.GraphInfo.NodeView n = gi.nodes.get(i);
+            sb.append("{\"id\":").append(n.id)
+              .append(",\"metadata\":").append(jsonStr(n.metadata))
+              .append(",\"category\":").append(jsonStr(n.category))
+              .append(",\"maxLyr\":").append(n.maxLayer)
+              .append('}');
+        }
+        sb.append("],\"edges\":[");
+        for (int i = 0; i < gi.edges.size(); i++) {
+            if (i > 0) sb.append(',');
+            HNSW.GraphInfo.EdgeView e = gi.edges.get(i);
+            sb.append("{\"src\":").append(e.src)
+              .append(",\"dst\":").append(e.dst)
+              .append(",\"lyr\":").append(e.layer)
+              .append('}');
+        }
+        sb.append("]}");
+        sendJson(ex, 200, sb.toString());
+    }
+
+    // GET /stats
+    private void handleStats(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        String json = "{\"count\":"     + vdb.size()
+                    + ",\"dims\":"      + vdb.dims
+                    + ",\"algorithms\":[\"bruteforce\",\"kdtree\",\"hnsw\"]"
+                    + ",\"metrics\":[\"euclidean\",\"cosine\",\"manhattan\"]}";
+        sendJson(ex, 200, json);
+    }
+
+    // POST /doc/insert  body: {title, text}
+    private void handleDocInsert(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendError(ex, "POST required"); return;
+        }
+        String body = readBody(ex);
+        try {
+            JsonObject obj   = JsonParser.parseString(body).getAsJsonObject();
+            String title = obj.has("title") ? obj.get("title").getAsString() : "";
+            String text  = obj.has("text")  ? obj.get("text").getAsString()  : "";
+
+            if (title.isBlank() || text.isBlank()) {
+                sendError(ex, "need title and text"); return;
+            }
+
+            List<String> chunks = OllamaClient.chunkText(text, 250, 50);
+            List<Integer> ids = new ArrayList<>();
+
+            for (int i = 0; i < chunks.size(); i++) {
+                float[] emb = ollama.embed(chunks.get(i));
+                if (emb.length == 0) {
+                    sendError(ex, "Ollama unavailable. Install from https://ollama.com then run: " +
+                                  "ollama pull nomic-embed-text && ollama pull llama3.2");
+                    return;
+                }
+                String chunkTitle = chunks.size() > 1
+                    ? title + " [" + (i + 1) + "/" + chunks.size() + "]"
+                    : title;
+                ids.add(docDB.insert(chunkTitle, chunks.get(i), emb));
+            }
+
+            StringBuilder sb = new StringBuilder("{\"ids\":[");
+            for (int i = 0; i < ids.size(); i++) {
+                if (i > 0) sb.append(','); sb.append(ids.get(i));
+            }
+            sb.append("],\"chunks\":").append(chunks.size())
+              .append(",\"dims\":").append(docDB.getDims())
+              .append('}');
+            sendJson(ex, 200, sb.toString());
+
+        } catch (Exception e) {
+            sendError(ex, "invalid JSON: " + e.getMessage());
+        }
+    }
+
+    // GET /doc/list
+    private void handleDocList(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        List<DocumentStore.DocItem> docs = docDB.all();
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < docs.size(); i++) {
+            if (i > 0) sb.append(',');
+            DocumentStore.DocItem d = docs.get(i);
+            String preview = d.text.length() > 120 ? d.text.substring(0, 120) + "…" : d.text;
+            int words = d.text.trim().split("\\s+").length;
+            sb.append("{\"id\":").append(d.id)
+              .append(",\"title\":").append(jsonStr(d.title))
+              .append(",\"preview\":").append(jsonStr(preview))
+              .append(",\"words\":").append(words)
+              .append('}');
+        }
+        sb.append(']');
+        sendJson(ex, 200, sb.toString());
+    }
+
+    // DELETE /doc/delete/:id
+    private void handleDocDelete(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        if (!"DELETE".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendError(ex, "DELETE required"); return;
+        }
+        try {
+            int id  = parseIdFromPath(ex.getRequestURI().getPath());
+            boolean ok = docDB.remove(id);
+            sendJson(ex, 200, "{\"ok\":" + ok + "}");
+        } catch (NumberFormatException e) {
+            sendError(ex, "invalid id");
+        }
+    }
+
+    // POST /doc/ask  body: {question, k:3}
+    private void handleDocAsk(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendError(ex, "POST required"); return;
+        }
+        String body = readBody(ex);
+        try {
+            JsonObject obj = JsonParser.parseString(body).getAsJsonObject();
+            String question = obj.has("question") ? obj.get("question").getAsString() : "";
+            int k = obj.has("k") ? obj.get("k").getAsInt() : 3;
+
+            if (question.isBlank()) {
+                sendError(ex, "need question"); return;
+            }
+
+            // Step 1: embed the question
+            float[] qEmb = ollama.embed(question);
+            if (qEmb.length == 0) {
+                sendError(ex, "Ollama unavailable"); return;
+            }
+
+            // Step 2: retrieve top-k chunks
+            List<AbstractMap.SimpleEntry<Float, DocumentStore.DocItem>> hits = docDB.search(qEmb, k);
+
+            // Step 3: build prompt
+            StringBuilder ctx = new StringBuilder();
+            for (int i = 0; i < hits.size(); i++) {
+                ctx.append('[').append(i + 1).append("] Source: ")
+                   .append(hits.get(i).getValue().title).append("\n")
+                   .append(hits.get(i).getValue().text).append("\n\n");
+            }
+            String prompt =
+                "You are a helpful assistant. Answer the user's question directly. " +
+                "Use the provided context if it contains relevant information. " +
+                "If it doesn't, just use your own general knowledge. " +
+                "IMPORTANT: Do NOT mention the 'context', 'provided text', or say things like " +
+                "'the context doesn't mention'. Just answer the question naturally.\n\n" +
+                "Context:\n" + ctx +
+                "Question: " + question + "\n\nAnswer:";
+
+            // Step 4: generate
+            String answer = ollama.generate(prompt);
+
+            // Step 5: return
+            StringBuilder sb = new StringBuilder();
+            sb.append("{\"answer\":").append(jsonStr(answer))
+              .append(",\"model\":").append(jsonStr(ollama.genModel))
+              .append(",\"contexts\":[");
+            for (int i = 0; i < hits.size(); i++) {
+                if (i > 0) sb.append(',');
+                DocumentStore.DocItem d = hits.get(i).getValue();
+                float dist = hits.get(i).getKey();
+                sb.append("{\"id\":").append(d.id)
+                  .append(",\"title\":").append(jsonStr(d.title))
+                  .append(",\"text\":").append(jsonStr(d.text))
+                  .append(",\"distance\":").append(String.format("%.4f", dist))
+                  .append('}');
+            }
+            sb.append("],\"docCount\":").append(docDB.size()).append('}');
+            sendJson(ex, 200, sb.toString());
+
+        } catch (Exception e) {
+            sendError(ex, "invalid JSON: " + e.getMessage());
+        }
+    }
+
+    // GET /status
+    private void handleStatus(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        boolean up = ollama.isAvailable();
+        String json = "{\"ollamaAvailable\":" + up
+                    + ",\"embedModel\":"       + jsonStr(ollama.embedModel)
+                    + ",\"genModel\":"         + jsonStr(ollama.genModel)
+                    + ",\"docCount\":"         + docDB.size()
+                    + ",\"docDims\":"          + docDB.getDims()
+                    + ",\"demoDims\":"         + vdb.dims
+                    + ",\"demoCount\":"        + vdb.size() + "}";
+        sendJson(ex, 200, json);
+    }
+
+    // ── File upload handler ──────────────────────────────────────────────
+
+    private void handleDocUpload(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendError(ex, "POST required"); return;
+        }
+
+        String contentType = ex.getRequestHeaders().getFirst("Content-Type");
+        if (contentType == null || !contentType.contains("multipart/form-data")) {
+            sendError(ex, "multipart/form-data required"); return;
+        }
+
+        String boundary = null;
+        for (String part : contentType.split(";")) {
+            part = part.trim();
+            if (part.startsWith("boundary=")) {
+                boundary = part.substring("boundary=".length()).trim();
+                break;
+            }
+        }
+        if (boundary == null) { sendError(ex, "missing boundary"); return; }
+
+        byte[] body = ex.getRequestBody().readAllBytes();
+        String bodyStr = new String(body, StandardCharsets.ISO_8859_1);
+
+        String delimiter = "--" + boundary;
+        String[] rawParts = bodyStr.split(java.util.regex.Pattern.quote(delimiter));
+
+        String title = null;
+        byte[] fileBytes = null;
+        String fileName = null;
+
+        for (String rawPart : rawParts) {
+            if (rawPart.trim().isEmpty() || rawPart.trim().equals("--")) continue;
+            int headerEnd = rawPart.indexOf("\r\n\r\n");
+            if (headerEnd < 0) continue;
+            String headers = rawPart.substring(0, headerEnd);
+            String partBodyStr = rawPart.substring(headerEnd + 4);
+            if (partBodyStr.endsWith("\r\n")) partBodyStr = partBodyStr.substring(0, partBodyStr.length() - 2);
+
+            String disposition = "";
+            for (String h : headers.split("\r\n")) {
+                if (h.toLowerCase().startsWith("content-disposition")) { disposition = h; break; }
+            }
+
+            String fieldName = extractDispositionParam(disposition, "name");
+            String fn = extractDispositionParam(disposition, "filename");
+
+            if ("title".equals(fieldName)) {
+                title = partBodyStr.trim();
+            } else if ("file".equals(fieldName) && fn != null && !fn.isEmpty()) {
+                fileName = fn;
+                fileBytes = partBodyStr.getBytes(StandardCharsets.ISO_8859_1);
+            }
+        }
+
+        if (fileBytes == null || fileName == null) {
+            sendError(ex, "no file found in upload"); return;
+        }
+        if (title == null || title.isEmpty()) title = fileName;
+
+        String ext = fileName.contains(".") ? fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase() : "";
+        String text;
+        try {
+            if ("pdf".equals(ext)) {
+                text = com.vectordb.util.FileParser.parsePdf(fileBytes);
+            } else if ("txt".equals(ext) || "md".equals(ext)) {
+                text = com.vectordb.util.FileParser.parseText(new String(fileBytes, StandardCharsets.UTF_8));
+            } else {
+                sendError(ex, "Unsupported file type. Only PDF, TXT, and MD files are accepted."); return;
+            }
+        } catch (Exception e) {
+            sendError(ex, "File parsing failed: " + e.getMessage()); return;
+        }
+
+        if (text.isBlank()) { sendError(ex, "File appears to be empty or unreadable."); return; }
+
+        List<String> chunks = OllamaClient.chunkText(text, 250, 50);
+        List<Integer> ids = new ArrayList<>();
+
+        for (int i = 0; i < chunks.size(); i++) {
+            float[] emb = ollama.embed(chunks.get(i));
+            if (emb.length == 0) {
+                sendError(ex, "Ollama unavailable. Install from https://ollama.com then run: ollama pull nomic-embed-text"); return;
+            }
+            String chunkTitle = chunks.size() > 1 ? title + " [" + (i + 1) + "/" + chunks.size() + "]" : title;
+            ids.add(docDB.insert(chunkTitle, chunks.get(i), emb));
+        }
+
+        float[] proxy = new float[vdb.dims];
+        java.util.Arrays.fill(proxy, 0.5f);
+        vdb.insert(title, "doc", proxy, VectorStore.getDistFn("cosine"));
+
+        StringBuilder sb = new StringBuilder("{\"ok\":true,\"title\":");
+        sb.append(jsonStr(title)).append(",\"chunks\":").append(chunks.size())
+          .append(",\"dims\":").append(docDB.getDims()).append('}');
+        sendJson(ex, 200, sb.toString());
+    }
+
+    private void handleDocDeleteAll(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        docDB.removeAll();
+        vdb.removeAllByCategory("doc");
+        sendJson(ex, 200, "{\"ok\":true}");
+    }
+
+    private String extractDispositionParam(String disposition, String param) {
+        for (String part : disposition.split(";")) {
+            part = part.trim();
+            if (part.startsWith(param + "=")) {
+                String val = part.substring(param.length() + 1).trim();
+                if (val.startsWith("\"") && val.endsWith("\"")) val = val.substring(1, val.length() - 1);
+                return val;
+            }
+        }
+        return null;
+    }
+
+    // ── JSON string escaping ──────────────────────────────────────────────
+
+    private static String jsonStr(String s) {
+        if (s == null) return "null";
+        StringBuilder sb = new StringBuilder("\"");
+        for (char c : s.toCharArray()) {
+            switch (c) {
+                case '"':  sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\n': sb.append("\\n");  break;
+                case '\r': sb.append("\\r");  break;
+                case '\t': sb.append("\\t");  break;
+                default:
+                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+                    else          sb.append(c);
+            }
+        }
+        return sb.append('"').toString();
+    }
+}
+</file>
+
+<file path="src/main/java/com/vectordb/db/DocumentStore.java">
+package com.vectordb.db;
+
+import com.vectordb.algorithms.BruteForce;
+import com.vectordb.algorithms.HNSW;
+
+import java.util.*;
+
+import static com.vectordb.db.VectorStore.cosine;
+
+/**
+ * Document store backed by a dedicated HNSW index operating on real
+ * 768-dimensional Ollama embeddings (nomic-embed-text).
+ *
+ * Falls back to BruteForce when the collection has fewer than 10 items.
+ */
+public class DocumentStore {
+
+    public static class DocItem {
+        public final int id;
+        public final String title;
+        public final String text;
+        public final float[] embedding;
+
+        public DocItem(int id, String title, String text, float[] embedding) {
+            this.id = id;
+            this.title = title;
+            this.text = text;
+            this.embedding = embedding;
+        }
+    }
+
+    private final Map<Integer, DocItem> store = new HashMap<>();
+    private final HNSW hnsw = new HNSW(16, 200);
+    private final BruteForce bf = new BruteForce();
+    private int nextId = 1;
+    private int dims = 0;
+
+    public synchronized int insert(String title, String text, float[] embedding) {
+        if (dims == 0) dims = embedding.length;
+        int id = nextId++;
+        DocItem item = new DocItem(id, title, text, embedding);
+        store.put(id, item);
+
+        hnsw.insert(id, title, "doc", embedding, VectorStore::cosine);
+        BruteForce.Item bfi = new BruteForce.Item(id, title, "doc", embedding);
+        bf.insert(bfi);
+
+        return id;
+    }
+
+    /**
+     * Returns top-k most similar document chunks (distance, DocItem) pairs.
+     * Filters by max_dist = 0.7f (cosine distance threshold).
+     */
+    public synchronized List<float[]> searchRaw(float[] query, int k) {
+        if (store.isEmpty()) return Collections.emptyList();
+        List<float[]> raw = (store.size() < 10)
+            ? bf.knn(query, k, VectorStore::cosine)
+            : hnsw.knn(query, k, 50, VectorStore::cosine);
+        return raw;
+    }
+
+    public synchronized List<AbstractMap.SimpleEntry<Float, DocItem>> search(float[] query, int k) {
+        if (store.isEmpty()) return Collections.emptyList();
+
+        List<float[]> raw = searchRaw(query, k);
+        List<AbstractMap.SimpleEntry<Float, DocItem>> out = new ArrayList<>();
+
+        for (float[] pair : raw) {
+            float dist = pair[0];
+            int   id   = (int) pair[1];
+            DocItem item = store.get(id);
+            if (item != null) {
+                out.add(new AbstractMap.SimpleEntry<>(dist, item));
+            }
+        }
+        return out;
+    }
+
+    public synchronized boolean remove(int id) {
+        if (!store.containsKey(id)) return false;
+        store.remove(id);
+        hnsw.remove(id);
+        bf.remove(id);
+        return true;
+    }
+
+    public synchronized List<DocItem> all() {
+        return new ArrayList<>(store.values());
+    }
+
+    public synchronized int size() {
+        return store.size();
+    }
+
+    public int getDims() {
+        return dims;
+    }
+
+    public synchronized void removeAll() {
+        List<Integer> ids = new ArrayList<>(store.keySet());
+        for (int id : ids) remove(id);
+    }
+}
+</file>
+
+<file path="src/main/java/com/vectordb/db/VectorStore.java">
+package com.vectordb.db;
+
+import com.vectordb.algorithms.BruteForce;
+import com.vectordb.algorithms.HNSW;
+import com.vectordb.algorithms.KDTree;
+
+import java.util.*;
+import java.util.function.BiFunction;
+
+/**
+ * Unified demo vector database (16-dimensional vectors).
+ * Maintains BruteForce, KD-Tree, and HNSW indexes in sync.
+ */
+public class VectorStore {
+
+    // ── Data model ───────────────────────────────────────────────────────
+
+    public static class Item {
+        public final int id;
+        public final String metadata;
+        public final String category;
+        public final float[] embedding;
+
+        public Item(int id, String metadata, String category, float[] embedding) {
+            this.id = id;
+            this.metadata = metadata;
+            this.category = category;
+            this.embedding = embedding;
+        }
+    }
+
+    public static class Hit {
+        public final int id;
+        public final String metadata;
+        public final String category;
+        public final float[] embedding;
+        public final float distance;
+
+        public Hit(int id, String metadata, String category, float[] embedding, float distance) {
+            this.id = id;
+            this.metadata = metadata;
+            this.category = category;
+            this.embedding = embedding;
+            this.distance = distance;
+        }
+    }
+
+    public static class SearchResult {
+        public final List<Hit> hits;
+        public final long latencyUs;
+        public final String algo;
+        public final String metric;
+
+        public SearchResult(List<Hit> hits, long latencyUs, String algo, String metric) {
+            this.hits = hits;
+            this.latencyUs = latencyUs;
+            this.algo = algo;
+            this.metric = metric;
+        }
+    }
+
+    public static class BenchResult {
+        public final long bruteforceUs;
+        public final long kdtreeUs;
+        public final long hnswUs;
+        public final int itemCount;
+
+        public BenchResult(long bruteforceUs, long kdtreeUs, long hnswUs, int itemCount) {
+            this.bruteforceUs = bruteforceUs;
+            this.kdtreeUs = kdtreeUs;
+            this.hnswUs = hnswUs;
+            this.itemCount = itemCount;
+        }
+    }
+
+    // ── State ────────────────────────────────────────────────────────────
+
+    public final int dims;
+    private final Map<Integer, Item> store = new HashMap<>();
+    private final BruteForce bf = new BruteForce();
+    private final KDTree kdt;
+    private final HNSW hnsw;
+    private int nextId = 1;
+
+    public VectorStore(int dims) {
+        this.dims = dims;
+        this.kdt  = new KDTree(dims);
+        this.hnsw = new HNSW(16, 200);
+    }
+
+    // ── Distance functions ───────────────────────────────────────────────
+
+    public static float euclidean(float[] a, float[] b) {
+        float s = 0;
+        for (int i = 0; i < a.length; i++) { float d = a[i] - b[i]; s += d * d; }
+        return (float) Math.sqrt(s);
+    }
+
+    public static float cosine(float[] a, float[] b) {
+        float dot = 0, na = 0, nb = 0;
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i];
+        }
+        if (na < 1e-9f || nb < 1e-9f) return 1.0f;
+        return 1.0f - dot / (float) (Math.sqrt(na) * Math.sqrt(nb));
+    }
+
+    public static float manhattan(float[] a, float[] b) {
+        float s = 0;
+        for (int i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]);
+        return s;
+    }
+
+    public static BiFunction<float[], float[], Float> getDistFn(String metric) {
+        switch (metric) {
+            case "cosine":    return VectorStore::cosine;
+            case "manhattan": return VectorStore::manhattan;
+            default:          return VectorStore::euclidean;
+        }
+    }
+
+    // ── Mutations ────────────────────────────────────────────────────────
+
+    public synchronized int insert(String metadata, String category, float[] embedding,
+                                   BiFunction<float[], float[], Float> dist) {
+        int id = nextId++;
+        Item item = new Item(id, metadata, category, embedding);
+        store.put(id, item);
+
+        BruteForce.Item bfi = new BruteForce.Item(id, metadata, category, embedding);
+        bf.insert(bfi);
+        kdt.insert(id, metadata, category, embedding);
+        hnsw.insert(id, metadata, category, embedding, dist);
+
+        return id;
+    }
+
+    public synchronized boolean remove(int id) {
+        if (!store.containsKey(id)) return false;
+        store.remove(id);
+        bf.remove(id);
+        hnsw.remove(id);
+        // KD-Tree doesn't support deletion — rebuild
+        List<BruteForce.Item> remaining = bf.all();
+        kdt.rebuild(remaining);
+        return true;
+    }
+
+    // ── Search ───────────────────────────────────────────────────────────
+
+    public synchronized SearchResult search(float[] query, int k, String metric, String algo) {
+        BiFunction<float[], float[], Float> dist = getDistFn(metric);
+
+        long t0 = System.nanoTime();
+        List<float[]> raw;
+        switch (algo) {
+            case "bruteforce": raw = bf.knn(query, k, dist); break;
+            case "kdtree":     raw = kdt.knn(query, k, dist); break;
+            default:           raw = hnsw.knn(query, k, 50, dist); break;
+        }
+        long us = (System.nanoTime() - t0) / 1000;
+
+        List<Hit> hits = new ArrayList<>();
+        for (float[] pair : raw) {
+            float d  = pair[0];
+            int   id = (int) pair[1];
+            Item item = store.get(id);
+            if (item != null) {
+                hits.add(new Hit(id, item.metadata, item.category, item.embedding, d));
+            }
+        }
+        return new SearchResult(hits, us, algo, metric);
+    }
+
+    public synchronized BenchResult benchmark(float[] query, int k, String metric) {
+        BiFunction<float[], float[], Float> dist = getDistFn(metric);
+
+        long t0 = System.nanoTime(); bf.knn(query, k, dist);
+        long bfUs = (System.nanoTime() - t0) / 1000;
+
+        t0 = System.nanoTime(); kdt.knn(query, k, dist);
+        long kdUs = (System.nanoTime() - t0) / 1000;
+
+        t0 = System.nanoTime(); hnsw.knn(query, k, 50, dist);
+        long hnswUs = (System.nanoTime() - t0) / 1000;
+
+        return new BenchResult(bfUs, kdUs, hnswUs, store.size());
+    }
+
+    // ── Accessors ────────────────────────────────────────────────────────
+
+    public synchronized List<Item> all() {
+        return new ArrayList<>(store.values());
+    }
+
+    public synchronized HNSW.GraphInfo hnswInfo() {
+        return hnsw.getInfo();
+    }
+
+    public synchronized int size() {
+        return store.size();
+    }
+
+    public synchronized void removeAllByCategory(String category) {
+        List<Integer> toRemove = new ArrayList<>();
+        for (Item item : store.values()) {
+            if (category.equals(item.category)) toRemove.add(item.id);
+        }
+        for (int id : toRemove) remove(id);
+    }
+}
+</file>
+
+<file path="src/main/java/com/vectordb/ollama/OllamaClient.java">
+package com.vectordb.ollama;
+
+import com.google.gson.*;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * HTTP client for the local Ollama API (http://localhost:11434).
+ *
+ * Endpoints used:
+ * POST /api/embeddings → {model, prompt} → {embedding:[...]}
+ * POST /api/generate → {model, prompt, stream:false} → {response:"..."}
+ * GET /api/tags → availability check
+ */
+public class OllamaClient {
+
+    public final String embedModel = "nomic-embed-text";
+    public final String genModel = "gemma4:e2b";
+
+    private final String baseUrl;
+    private final HttpClient http;
+    private final Gson gson = new Gson();
+
+    public OllamaClient(String host, int port) {
+        this.baseUrl = "http://" + host + ":" + port;
+        this.http = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .build();
+    }
+
+    public OllamaClient() {
+        this("localhost", 11434);
+    }
+
+    // ── Availability check ───────────────────────────────────────────────
+
+    public boolean isAvailable() {
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/api/tags"))
+                    .timeout(Duration.ofSeconds(3))
+                    .GET()
+                    .build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            return resp.statusCode() == 200;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // ── Embedding ────────────────────────────────────────────────────────
+
+    /**
+     * Generates a text embedding via Ollama's nomic-embed-text model.
+     * Returns an empty array if Ollama is unavailable or an error occurs.
+     */
+    public float[] embed(String text) {
+        try {
+            JsonObject body = new JsonObject();
+            body.addProperty("model", embedModel);
+            body.addProperty("prompt", text);
+
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/api/embeddings"))
+                    .timeout(Duration.ofSeconds(120))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body)))
+                    .build();
+
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200)
+                return new float[0];
+
+            JsonObject json = JsonParser.parseString(resp.body()).getAsJsonObject();
+            if (!json.has("embedding"))
+                return new float[0];
+
+            JsonArray arr = json.getAsJsonArray("embedding");
+            float[] result = new float[arr.size()];
+            for (int i = 0; i < arr.size(); i++) {
+                result[i] = arr.get(i).getAsFloat();
+            }
+            return result;
+
+        } catch (Exception e) {
+            return new float[0];
+        }
+    }
+
+    // ── Generation ───────────────────────────────────────────────────────
+
+    /**
+     * Generates text via Ollama's llama3.2 model (non-streaming).
+     * Returns an error string if Ollama is unavailable.
+     */
+    public String generate(String prompt) {
+        try {
+            JsonObject body = new JsonObject();
+            body.addProperty("model", genModel);
+            body.addProperty("prompt", prompt);
+            body.addProperty("stream", false);
+
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/api/generate"))
+                    .timeout(Duration.ofSeconds(120))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body)))
+                    .build();
+
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200)
+                return "ERROR: Ollama unavailable. Run: ollama serve";
+
+            JsonObject json = JsonParser.parseString(resp.body()).getAsJsonObject();
+            return json.has("response") ? json.get("response").getAsString()
+                    : "ERROR: no response field";
+
+        } catch (Exception e) {
+            return "ERROR: Ollama unavailable. Run: ollama serve (" + e.getMessage() + ")";
+        }
+    }
+
+    // ── Text chunker ─────────────────────────────────────────────────────
+
+    /**
+     * Splits text into overlapping chunks of chunkWords words with overlapWords
+     * overlap.
+     * Matches the C++ chunkText() logic exactly.
+     */
+    public static List<String> chunkText(String text, int chunkWords, int overlapWords) {
+        String[] words = text.trim().split("\\s+");
+        if (words.length == 0)
+            return List.of();
+        if (words.length <= chunkWords)
+            return List.of(text);
+
+        List<String> chunks = new ArrayList<>();
+        int step = chunkWords - overlapWords;
+        for (int i = 0; i < words.length; i += step) {
+            int end = Math.min(i + chunkWords, words.length);
+            StringBuilder sb = new StringBuilder();
+            for (int j = i; j < end; j++) {
+                if (j > i)
+                    sb.append(' ');
+                sb.append(words[j]);
+            }
+            chunks.add(sb.toString());
+            if (end == words.length)
+                break;
+        }
+        return chunks;
+    }
+}
+</file>
+
+<file path="src/main/java/com/vectordb/VectorDB.java">
+package com.vectordb;
+
+import com.sun.net.httpserver.HttpServer;
+import com.vectordb.api.Router;
+import com.vectordb.db.DocumentStore;
+import com.vectordb.db.VectorStore;
+import com.vectordb.ollama.OllamaClient;
+
+import java.net.InetSocketAddress;
+import java.util.concurrent.Executors;
+
+/**
+ * Entry point for the VectorDB Engine (Java port).
+ *
+ * Starts an HTTP server on port 8080, pre-loads 20 demo 16D vectors,
+ * and wires all REST API routes.
+ *
+ * Run with:
+ *   java -jar build/libs/VectorDB-all.jar
+ */
+public class VectorDB {
+
+    private static final int    PORT = 8080;
+    private static final int    DIMS = 16;
+
+    public static void main(String[] args) throws Exception {
+        // ── Initialise components ────────────────────────────────────────
+        VectorStore   vdb    = new VectorStore(DIMS);
+        DocumentStore docDB  = new DocumentStore();
+        OllamaClient  ollama = new OllamaClient();
+
+        // ── Pre-load 20 demo vectors ─────────────────────────────────────
+        loadDemo(vdb);
+
+        // ── Check Ollama availability ────────────────────────────────────
+        boolean ollamaUp = ollama.isAvailable();
+
+        // ── Print startup banner ─────────────────────────────────────────
+        System.out.println("=== VectorDB Engine (Java) ===");
+        System.out.println("http://localhost:" + PORT);
+        System.out.println(vdb.size() + " demo vectors | " + DIMS + " dims | HNSW+KD-Tree+BruteForce");
+        if (ollamaUp) {
+            System.out.println("Ollama: ONLINE");
+            System.out.println("  embed model: " + ollama.embedModel + "  gen model: " + ollama.genModel);
+        } else {
+            System.out.println("Ollama: OFFLINE (install from https://ollama.com)");
+        }
+
+        // ── Start HTTP server ─────────────────────────────────────────────
+        HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", PORT), 0);
+        server.setExecutor(Executors.newCachedThreadPool());
+
+        Router router = new Router(vdb, docDB, ollama);
+        router.register(server);
+
+        server.start();
+        System.out.println("Server started — listening on :" + PORT);
+    }
+
+    // ── Demo data (20 × 16D vectors, same as C++ main.cpp) ──────────────
+    //
+    // Dimension layout:
+    //   Dims  0- 3: CS category
+    //   Dims  4- 7: Math category
+    //   Dims  8-11: Food category
+    //   Dims 12-15: Sports category
+
+    private static void loadDemo(VectorStore db) {
+        var dist = VectorStore.getDistFn("cosine");
+
+        // ─── Computer Science ────────────────────────────────────────────
+        db.insert("Linked List: nodes connected by pointers", "cs",
+            new float[]{0.90f,0.85f,0.72f,0.68f,0.12f,0.08f,0.15f,0.10f,0.05f,0.08f,0.06f,0.09f,0.07f,0.11f,0.08f,0.06f}, dist);
+
+        db.insert("Binary Search Tree: O(log n) search and insert", "cs",
+            new float[]{0.88f,0.82f,0.78f,0.74f,0.15f,0.10f,0.08f,0.12f,0.06f,0.07f,0.08f,0.05f,0.09f,0.06f,0.07f,0.10f}, dist);
+
+        db.insert("Dynamic Programming: memoization overlapping subproblems", "cs",
+            new float[]{0.82f,0.76f,0.88f,0.80f,0.20f,0.18f,0.12f,0.09f,0.07f,0.06f,0.08f,0.07f,0.08f,0.09f,0.06f,0.07f}, dist);
+
+        db.insert("Graph BFS and DFS: breadth and depth first traversal", "cs",
+            new float[]{0.85f,0.80f,0.75f,0.82f,0.18f,0.14f,0.10f,0.08f,0.06f,0.09f,0.07f,0.06f,0.10f,0.08f,0.09f,0.07f}, dist);
+
+        db.insert("Hash Table: O(1) lookup with collision chaining", "cs",
+            new float[]{0.87f,0.78f,0.70f,0.76f,0.13f,0.11f,0.09f,0.14f,0.08f,0.07f,0.06f,0.08f,0.07f,0.10f,0.08f,0.09f}, dist);
+
+        // ─── Mathematics ─────────────────────────────────────────────────
+        db.insert("Calculus: derivatives integrals and limits", "math",
+            new float[]{0.12f,0.15f,0.18f,0.10f,0.91f,0.86f,0.78f,0.72f,0.08f,0.06f,0.07f,0.09f,0.07f,0.08f,0.06f,0.10f}, dist);
+
+        db.insert("Linear Algebra: matrices eigenvalues eigenvectors", "math",
+            new float[]{0.20f,0.18f,0.15f,0.12f,0.88f,0.90f,0.82f,0.76f,0.09f,0.07f,0.08f,0.06f,0.10f,0.07f,0.08f,0.09f}, dist);
+
+        db.insert("Probability: distributions random variables Bayes theorem", "math",
+            new float[]{0.15f,0.12f,0.20f,0.18f,0.84f,0.80f,0.88f,0.82f,0.07f,0.08f,0.06f,0.10f,0.09f,0.06f,0.09f,0.08f}, dist);
+
+        db.insert("Number Theory: primes modular arithmetic RSA cryptography", "math",
+            new float[]{0.22f,0.16f,0.14f,0.20f,0.80f,0.85f,0.76f,0.90f,0.08f,0.09f,0.07f,0.06f,0.08f,0.10f,0.07f,0.06f}, dist);
+
+        db.insert("Combinatorics: permutations combinations generating functions", "math",
+            new float[]{0.18f,0.20f,0.16f,0.14f,0.86f,0.78f,0.84f,0.80f,0.06f,0.07f,0.09f,0.08f,0.06f,0.09f,0.10f,0.07f}, dist);
+
+        // ─── Food ────────────────────────────────────────────────────────
+        db.insert("Neapolitan Pizza: wood-fired dough San Marzano tomatoes", "food",
+            new float[]{0.08f,0.06f,0.09f,0.07f,0.07f,0.08f,0.06f,0.09f,0.90f,0.86f,0.78f,0.72f,0.08f,0.06f,0.09f,0.07f}, dist);
+
+        db.insert("Sushi: vinegared rice raw fish and nori rolls", "food",
+            new float[]{0.06f,0.08f,0.07f,0.09f,0.09f,0.06f,0.08f,0.07f,0.86f,0.90f,0.82f,0.76f,0.07f,0.09f,0.06f,0.08f}, dist);
+
+        db.insert("Ramen: noodle soup with chashu pork and soft-boiled eggs", "food",
+            new float[]{0.09f,0.07f,0.06f,0.08f,0.08f,0.09f,0.07f,0.06f,0.82f,0.78f,0.90f,0.84f,0.09f,0.07f,0.08f,0.06f}, dist);
+
+        db.insert("Tacos: corn tortillas with carnitas salsa and cilantro", "food",
+            new float[]{0.07f,0.09f,0.08f,0.06f,0.06f,0.07f,0.09f,0.08f,0.78f,0.82f,0.86f,0.90f,0.06f,0.08f,0.07f,0.09f}, dist);
+
+        db.insert("Croissant: laminated pastry with buttery flaky layers", "food",
+            new float[]{0.06f,0.07f,0.10f,0.09f,0.10f,0.06f,0.07f,0.10f,0.85f,0.80f,0.76f,0.82f,0.09f,0.07f,0.10f,0.06f}, dist);
+
+        // ─── Sports ──────────────────────────────────────────────────────
+        db.insert("Basketball: fast-paced shooting dribbling slam dunks", "sports",
+            new float[]{0.09f,0.07f,0.08f,0.10f,0.08f,0.09f,0.07f,0.06f,0.08f,0.07f,0.09f,0.06f,0.91f,0.85f,0.78f,0.72f}, dist);
+
+        db.insert("Football: tackles touchdowns field goals and strategy", "sports",
+            new float[]{0.07f,0.09f,0.06f,0.08f,0.09f,0.07f,0.10f,0.08f,0.07f,0.09f,0.08f,0.07f,0.87f,0.89f,0.82f,0.76f}, dist);
+
+        db.insert("Tennis: racket volleys groundstrokes and Wimbledon serves", "sports",
+            new float[]{0.08f,0.06f,0.09f,0.07f,0.07f,0.08f,0.06f,0.09f,0.09f,0.06f,0.07f,0.08f,0.83f,0.80f,0.88f,0.82f}, dist);
+
+        db.insert("Chess: openings endgames tactics strategic board game", "sports",
+            new float[]{0.25f,0.20f,0.22f,0.18f,0.22f,0.18f,0.20f,0.15f,0.06f,0.08f,0.07f,0.09f,0.80f,0.84f,0.78f,0.90f}, dist);
+
+        db.insert("Swimming: butterfly freestyle backstroke Olympic competition", "sports",
+            new float[]{0.06f,0.08f,0.07f,0.09f,0.08f,0.06f,0.09f,0.07f,0.10f,0.08f,0.06f,0.07f,0.85f,0.82f,0.86f,0.80f}, dist);
+    }
+}
+</file>
+
+<file path="src/main/resources/index.html">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VectraCore</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#07070f;--card:#0c0c18;--border:#151528;--border2:#1e1e3a;
+  --cs:#00d9ff;--math:#b388ff;--food:#ffb74d;--sports:#69f0ae;--doc:#34d399;
+  --accent:#6c63ff;--text:#cdd6f4;--muted:#4a4a6a;--red:#f38ba8;--green:#a6e3a1;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Fira Code','Courier New',monospace;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+
+header{background:var(--card);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.logo{font-size:16px;font-weight:600;letter-spacing:5px;background:linear-gradient(90deg,var(--cs),var(--accent),var(--math));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.badge{font-size:9px;padding:2px 8px;border-radius:20px;border:1px solid var(--border2);color:var(--muted);letter-spacing:1px}
+.badge.hl{border-color:rgba(108,99,255,.4);color:var(--accent);background:rgba(108,99,255,.08)}
+.badge.ok{border-color:rgba(166,227,161,.3);color:var(--green);background:rgba(166,227,161,.07)}
+.badge.err{border-color:rgba(243,139,168,.3);color:var(--red);background:rgba(243,139,168,.07)}
+#statsLabel{margin-left:auto;font-size:10px;color:var(--muted)}
+
+.layout{display:flex;flex:1;overflow:hidden}
+
+/* LEFT — ASK AI */
+.left-panel{width:320px;flex-shrink:0;background:var(--card);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.panel-header{padding:14px 16px 10px;border-bottom:1px solid var(--border);font-size:9px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;display:flex;align-items:center;gap:8px}
+.panel-header::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.ask-controls{padding:14px 16px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--border);flex-shrink:0}
+textarea,input[type=text],select{width:100%;background:rgba(0,0,0,.35);border:1px solid var(--border2);color:var(--text);padding:9px 11px;border-radius:6px;font-family:inherit;font-size:11px;outline:none;transition:border-color .2s}
+textarea:focus,input[type=text]:focus,select:focus{border-color:var(--accent)}
+textarea{resize:none;line-height:1.6}
+select option{background:#0c0c18}
+.ask-row{display:flex;gap:7px;align-items:center}
+.ask-row select{width:auto;flex-shrink:0}
+button{padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:500;letter-spacing:.5px;transition:all .18s;width:100%}
+.btn-p{background:linear-gradient(135deg,var(--accent),#4f46e5);color:#fff;box-shadow:0 0 16px rgba(108,99,255,.25)}
+.btn-p:hover{box-shadow:0 0 26px rgba(108,99,255,.5);transform:translateY(-1px)}
+.btn-p:disabled{opacity:.4;transform:none;cursor:not-allowed}
+.btn-g{background:rgba(166,227,161,.1);color:var(--green);border:1px solid rgba(166,227,161,.25)}
+.btn-g:hover{background:rgba(166,227,161,.2)}
+.btn-g:disabled{opacity:.4;cursor:not-allowed}
+.btn-s{background:var(--border2);color:var(--text)}
+.btn-s:hover{background:#252545}
+.btn-s:disabled{opacity:.4;cursor:not-allowed}
+.btn-danger{background:rgba(243,139,168,.1);color:var(--red);border:1px solid rgba(243,139,168,.2)}
+.btn-danger:hover{background:rgba(243,139,168,.2)}
+.hint{font-size:9px;color:var(--muted);text-align:center}
+.chat-scroll{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.chat-q{background:rgba(108,99,255,.1);border:1px solid rgba(108,99,255,.2);border-left:3px solid var(--accent);border-radius:6px;padding:9px 11px;font-size:11px;line-height:1.6}
+.chat-a{background:rgba(0,0,0,.3);border:1px solid var(--border2);border-left:3px solid var(--green);border-radius:6px;padding:11px}
+.chat-a-label{font-size:8px;letter-spacing:2px;color:var(--doc);margin-bottom:5px;text-transform:uppercase}
+.chat-a-text{font-size:11px;line-height:1.8;white-space:pre-wrap}
+.chat-ctx{margin-top:8px;border-top:1px solid var(--border);padding-top:7px}
+.chat-ctx-label{font-size:8px;letter-spacing:1px;color:var(--muted);margin-bottom:5px;text-transform:uppercase}
+.ctx-chip{display:inline-block;font-size:8px;padding:2px 7px;border-radius:20px;margin:2px;background:rgba(108,99,255,.08);border:1px solid rgba(108,99,255,.18);color:var(--accent);cursor:pointer;transition:background .15s}
+.ctx-chip:hover{background:rgba(108,99,255,.2)}
+.ctx-expand{display:none;font-size:9px;color:var(--muted);line-height:1.6;margin-top:5px;padding:7px;background:rgba(0,0,0,.4);border-radius:4px}
+.thinking{display:flex;align-items:center;gap:7px;font-size:10px;color:var(--muted)}
+.spinner{width:12px;height:12px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.typing::after{content:'▋';animation:blink 1s step-end infinite}
+@keyframes blink{50%{opacity:0}}
+.empty-chat{color:var(--muted);font-size:10px;text-align:center;margin-top:30px;line-height:1.8}
+
+  .scatter-panel { flex:1; min-width:380px; position:relative; overflow:hidden; border-right:1px solid var(--border); background:var(--bg); }
+  #scatter { display:block; width:100%; height:100%; }
+
+/* CENTER — LIBRARY + SEARCH */
+.center-panel{flex:1;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border)}
+.center-tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0}
+.ctab{flex:1;padding:10px 6px;text-align:center;font-size:9px;letter-spacing:1.5px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;transition:all .2s;text-transform:uppercase}
+.ctab.on{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* LIBRARY TAB */
+.library-pane{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.library-pane.hidden,.search-pane.hidden{display:none}
+.upload-zone{border:2px dashed var(--border2);border-radius:10px;padding:32px 20px;text-align:center;cursor:pointer;transition:all .22s;position:relative}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--accent);background:rgba(108,99,255,.05)}
+.upload-zone .uz-icon{font-size:32px;margin-bottom:10px;opacity:.4}
+.upload-zone .uz-title{font-size:12px;color:var(--text);margin-bottom:5px}
+.upload-zone .uz-sub{font-size:10px;color:var(--muted)}
+.upload-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.upload-status{font-size:10px;padding:8px 12px;background:rgba(108,99,255,.08);border:1px solid rgba(108,99,255,.2);border-radius:6px;display:none;align-items:center;gap:8px}
+.upload-status.show{display:flex}
+.lib-header{display:flex;align-items:center;justify-content:space-between}
+.lib-title{font-size:9px;letter-spacing:2px;color:var(--muted);text-transform:uppercase}
+.clear-btn{font-size:9px;padding:3px 10px;width:auto;background:rgba(243,139,168,.08);color:var(--red);border:1px solid rgba(243,139,168,.2);border-radius:4px;cursor:pointer;font-family:inherit;transition:background .15s}
+.clear-btn:hover{background:rgba(243,139,168,.18)}
+.doc-list{display:flex;flex-direction:column;gap:7px}
+.dcard{background:var(--card);border:1px solid var(--border2);border-left:3px solid var(--doc);border-radius:7px;padding:10px 12px;animation:fu .22s ease}
+@keyframes fu{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
+.dcard-title{font-size:11px;font-weight:500;color:var(--doc);margin-bottom:3px}
+.dcard-preview{font-size:9px;color:var(--muted);line-height:1.6;margin-bottom:6px}
+.dcard-foot{display:flex;justify-content:space-between;align-items:center}
+.dcard-meta{font-size:8px;color:var(--muted)}
+.del{background:rgba(243,139,168,.1);color:var(--red);border:1px solid rgba(243,139,168,.2);border-radius:4px;cursor:pointer;font-size:9px;padding:2px 7px;font-family:inherit;transition:background .15s;width:auto}
+.del:hover{background:rgba(243,139,168,.22)}
+.empty-lib{text-align:center;padding:40px 20px;color:var(--muted);font-size:11px;line-height:2}
+.empty-icon{font-size:36px;opacity:.2;margin-bottom:10px}
+
+/* TEXT INSERT */
+.text-insert{background:var(--card);border:1px solid var(--border2);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:7px}
+.text-insert-label{font-size:9px;letter-spacing:2px;color:var(--muted);text-transform:uppercase}
+
+/* SEARCH TAB */
+.search-pane{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+.sec{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:7px;display:flex;align-items:center;gap:6px}
+.sec::after{content:'';flex:1;height:1px;background:var(--border)}
+.search-input-row{display:flex;flex-direction:column;gap:6px}
+.algo-row{display:flex;gap:4px}
+.algo-btn{flex:1;padding:7px 3px;border-radius:5px;border:1px solid var(--border2);background:transparent;color:var(--muted);font-size:9px;cursor:pointer;text-align:center;transition:all .18s;letter-spacing:.5px;font-family:inherit}
+.algo-btn.on{border-color:var(--accent);color:var(--accent);background:rgba(108,99,255,.1)}
+input[type=range]{width:100%;accent-color:var(--accent);background:transparent;border:none;padding:0}
+.results{display:flex;flex-direction:column;gap:6px}
+.rcard{background:rgba(0,0,0,.3);border:1px solid var(--border2);border-radius:7px;padding:9px 11px;animation:fu .22s ease}
+.rcard:hover{border-color:#252550}
+.rrank{font-size:8px;color:var(--muted);letter-spacing:1px;margin-bottom:2px}
+.rmeta{font-size:11px;line-height:1.5;margin-bottom:5px}
+.rfoot{display:flex;align-items:center;gap:5px}
+.rcat{font-size:8px;padding:2px 6px;border-radius:20px;letter-spacing:.5px}
+.rdist{font-size:9px;color:var(--muted);flex:1;text-align:right}
+.lat-big{font-size:28px;font-weight:600;color:var(--cs)}
+.lat-sub{font-size:10px;color:var(--muted);margin-top:2px}
+.bench{display:flex;flex-direction:column;gap:8px}
+.brow{display:flex;flex-direction:column;gap:3px}
+.blabel{display:flex;justify-content:space-between;font-size:9px}
+.btrack{height:6px;background:rgba(0,0,0,.3);border-radius:3px;overflow:hidden}
+.bfill{height:100%;border-radius:3px;transition:width .5s ease}
+#vecCvs{display:block;width:100%;background:rgba(0,0,0,.3);border-radius:5px}
+
+/* RIGHT — STATUS */
+.right-panel{width:280px;flex-shrink:0;background:var(--card);display:flex;flex-direction:column;overflow-y:auto;padding:14px;gap:14px}
+.status-card{background:rgba(0,0,0,.3);border:1px solid var(--border2);border-radius:8px;padding:11px 13px;font-size:10px;line-height:1.8}
+.status-card.ok{border-color:rgba(166,227,161,.25)}
+.status-card.err{border-color:rgba(243,139,168,.25)}
+.stat-row{display:flex;justify-content:space-between;align-items:center;font-size:10px;padding:3px 0;border-bottom:1px solid var(--border)}
+.stat-row:last-child{border-bottom:none}
+.stat-label{color:var(--muted)}
+.stat-val{color:var(--text);font-weight:500}
+.layers{display:flex;flex-direction:column;gap:4px}
+.lrow{display:flex;align-items:center;gap:6px;font-size:9px}
+.lnum{width:16px;text-align:right;color:var(--accent)}
+.ltrack{flex:1;height:4px;background:rgba(0,0,0,.3);border-radius:2px;overflow:hidden}
+.lfill{height:100%;background:var(--accent);border-radius:2px;opacity:.65;transition:width .4s}
+.lcount{width:72px;text-align:right;color:var(--muted)}
+.algo-info{display:flex;flex-direction:column;gap:6px}
+.algo-info-row{background:rgba(0,0,0,.2);border-radius:5px;padding:8px 10px}
+.algo-info-name{font-size:9px;color:var(--accent);letter-spacing:1px;margin-bottom:3px}
+.algo-info-desc{font-size:9px;color:var(--muted);line-height:1.5}
+
+#tip{position:fixed;display:none;background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;font-size:10px;pointer-events:none;max-width:200px;z-index:200;line-height:1.5}
+::-webkit-scrollbar{width:2px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">VECTRACORE</div>
+  <span class="badge hl">HNSW</span>
+  <span class="badge">KD-TREE</span>
+  <span class="badge">BRUTE FORCE</span>
+  <span class="badge" id="ollamaBadge">OLLAMA…</span>
+  <span id="statsLabel">loading…</span>
+</header>
+
+<div class="layout">
+
+  <!-- LEFT — ASK AI -->
+  <div class="left-panel">
+    <div class="panel-header">Ask AI (RAG)</div>
+    <div class="ask-controls">
+      <textarea id="ragQuestion" rows="5" placeholder="Ask anything about your documents…&#10;&#10;Ctrl+Enter to submit"></textarea>
+      <div class="ask-row">
+        <select id="ragK">
+          <option value="2">Top 2</option>
+          <option value="3" selected>Top 3</option>
+          <option value="5">Top 5</option>
+          <option value="8">Top 8</option>
+        </select>
+        <button class="btn-g" id="askBtn" onclick="askAI()" style="flex:1">🤖 ASK AI</button>
+      </div>
+      <div class="hint">Uses your uploaded documents as context</div>
+    </div>
+    <div class="chat-scroll" id="chatHistory">
+      <div class="empty-chat">Upload documents in the library<br>then ask questions here</div>
+    </div>
+  </div>
+
+  <!-- SCATTER PANEL -->
+  <div class="scatter-panel">
+    <canvas id="scatter"></canvas>
+  </div>
+
+  <!-- CENTER — LIBRARY + SEARCH TABS -->
+  <div class="center-panel">
+    <div class="center-tabs">
+      <div class="ctab on" onclick="switchCenterTab('library')">DOCUMENT LIBRARY</div>
+      <div class="ctab" onclick="switchCenterTab('search')">VECTOR SEARCH</div>
+    </div>
+
+    <!-- LIBRARY PANE -->
+    <div class="library-pane" id="libraryPane">
+
+      <!-- File Upload Zone -->
+      <div class="upload-zone" id="uploadZone">
+        <div class="uz-icon">⬆</div>
+        <div class="uz-title">Drop PDF, TXT, or MD files here</div>
+        <div class="uz-sub">or click to browse — multiple files supported</div>
+        <input type="file" id="fileInput" accept=".pdf,.txt,.md" multiple onchange="handleFileSelect(this)">
+      </div>
+
+      <!-- Upload status -->
+      <div class="upload-status" id="uploadStatus">
+        <div class="spinner"></div>
+        <span id="uploadStatusText">Uploading…</span>
+      </div>
+
+      <!-- Text Insert -->
+      <div class="text-insert">
+        <div class="text-insert-label">Or insert text directly</div>
+        <input type="text" id="addMeta" placeholder="Title / description…"/>
+        <input type="text" id="addCat" list="catList" placeholder="Category (e.g. cs, math, custom)"/>
+        <datalist id="catList">
+          <option value="cs">CS / Algorithms</option>
+          <option value="math">Mathematics</option>
+          <option value="food">Food &amp; Cooking</option>
+          <option value="sports">Sports &amp; Games</option>
+          <option value="doc">Document</option>
+        </datalist>
+        <button class="btn-s" onclick="addVector()" style="width:100%">+ INSERT DEMO VECTOR</button>
+        <div style="border-top:1px solid var(--border);padding-top:8px;display:flex;flex-direction:column;gap:6px">
+          <input type="text" id="docTitle" placeholder="Document title…"/>
+          <textarea id="docText" rows="3" placeholder="Paste text to embed via Ollama (RAG-indexed)…"></textarea>
+          <button class="btn-g" id="insertDocBtn" onclick="insertDocument()" style="width:100%">⚡ EMBED &amp; INSERT</button>
+          <div id="insertStatus" style="font-size:10px;color:var(--muted)"></div>
+        </div>
+      </div>
+
+      <!-- Document list -->
+      <div class="lib-header">
+        <div class="lib-title">Stored Documents (<span id="docCountLabel">0</span>)</div>
+        <button class="clear-btn" onclick="clearAllDocs()">Clear All</button>
+      </div>
+      <div class="doc-list" id="docList">
+        <div class="empty-lib">
+          <div class="empty-icon">📄</div>
+          No documents yet.<br>Upload files or paste text above.
+        </div>
+      </div>
+
+    </div>
+
+    <!-- SEARCH PANE -->
+    <div class="search-pane hidden" id="searchPane">
+
+      <div>
+        <div class="sec">Query demo vectors</div>
+        <div class="search-input-row">
+          <input type="text" id="qInput" placeholder="binary tree, sushi, basketball…"/>
+          <button class="btn-p" onclick="runSearch()" style="width:100%">⚡ SEARCH</button>
+        </div>
+      </div>
+
+      <div>
+        <div class="sec">Algorithm</div>
+        <div class="algo-row">
+          <div class="algo-btn on" data-algo="hnsw" onclick="setAlgo(this)">HNSW</div>
+          <div class="algo-btn" data-algo="kdtree" onclick="setAlgo(this)">KD-TREE</div>
+          <div class="algo-btn" data-algo="bruteforce" onclick="setAlgo(this)">BRUTE</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="sec">Distance metric</div>
+        <select id="metric">
+          <option value="cosine">Cosine similarity</option>
+          <option value="euclidean">Euclidean</option>
+          <option value="manhattan">Manhattan</option>
+        </select>
+      </div>
+
+      <div>
+        <div class="sec">Top-K — <span id="kLabel">5</span></div>
+        <input type="range" id="kSlider" min="1" max="10" value="5" oninput="document.getElementById('kLabel').textContent=this.value">
+      </div>
+
+      <div>
+        <div class="sec">Search latency</div>
+        <div class="lat-big" id="latBig">—</div>
+        <div class="lat-sub" id="latSub">No query yet</div>
+      </div>
+
+      <div>
+        <div class="sec">Top matches</div>
+        <div class="results" id="results">
+          <div style="color:var(--muted);font-size:10px">Run a search to see results…</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="sec">Query embedding (16D)</div>
+        <canvas id="vecCvs" height="68"></canvas>
+      </div>
+
+      <div id="benchSec" style="display:none">
+        <div class="sec">Algorithm comparison</div>
+        <div class="bench" id="benchBars"></div>
+      </div>
+
+      <div>
+        <div class="sec">Benchmark</div>
+        <button class="btn-s" onclick="runBenchmark()" style="width:100%">▶ COMPARE ALL ALGOS</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- RIGHT — STATUS PANEL -->
+  <div class="right-panel">
+
+    <div class="sec" style="margin-bottom:0">Ollama status</div>
+    <div class="status-card" id="ollamaStatus">Checking…</div>
+
+    <div class="sec" style="margin-bottom:0">System stats</div>
+    <div class="status-card">
+      <div class="stat-row"><span class="stat-label">Documents</span><span class="stat-val" id="statDocs">—</span></div>
+      <div class="stat-row"><span class="stat-label">Demo vectors</span><span class="stat-val" id="statDemo">—</span></div>
+      <div class="stat-row"><span class="stat-label">Embed dims</span><span class="stat-val" id="statDims">—</span></div>
+      <div class="stat-row"><span class="stat-label">Algorithms</span><span class="stat-val">3</span></div>
+    </div>
+
+    <div class="sec" style="margin-bottom:0">HNSW graph layers</div>
+    <div class="layers" id="layers">
+      <div style="color:var(--muted);font-size:10px">Loading…</div>
+    </div>
+
+    <div class="sec" style="margin-bottom:0">Algorithms</div>
+    <div class="algo-info">
+      <div class="algo-info-row">
+        <div class="algo-info-name">HNSW</div>
+        <div class="algo-info-desc">Hierarchical Navigable Small World. O(log N). Production-grade approximate search. Same algorithm as Pinecone, Weaviate, Chroma.</div>
+      </div>
+      <div class="algo-info-row">
+        <div class="algo-info-name">KD-TREE</div>
+        <div class="algo-info-desc">K-Dimensional tree. O(log N) exact search. Ball-within-hyperslab pruning. Degrades in high dimensions.</div>
+      </div>
+      <div class="algo-info-row">
+        <div class="algo-info-name">BRUTE FORCE</div>
+        <div class="algo-info-desc">Linear scan. O(N·d). Always exact. Baseline for correctness and benchmark comparison.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="tip"></div>
+
+<script>
+const API = 'http://localhost:8080';
+const DIMS = 16;
+const COL = {cs:'#00d9ff',math:'#b388ff',food:'#ffb74d',sports:'#69f0ae',doc:'#34d399',default:'#90a4ae'};
+const DIM_COL = ['#00d9ff','#00d9ff','#00d9ff','#00d9ff','#b388ff','#b388ff','#b388ff','#b388ff','#ffb74d','#ffb74d','#ffb74d','#ffb74d','#69f0ae','#69f0ae','#69f0ae','#69f0ae'];
+
+function getCatColor(cat) {
+  if (!cat) return COL.default;
+  cat = cat.toLowerCase();
+  if (COL[cat]) return COL[cat];
+  let h = 0; for(let i=0;i<cat.length;i++) h = Math.imul(31, h) + cat.charCodeAt(i) | 0;
+  return `hsl(${Math.abs(h) % 360}, 80%, 65%)`;
+}
+
+let selAlgo = 'hnsw', searchResults = [];
+let allItems = [], pcaPoints = [], hitIds = new Set(), queryPt = null;
+let hoverItem = null, pulse = 0;
+let bounds={minX:-1,maxX:1,minY:-1,maxY:1};
+
+
+
+// PCA AND SCATTER PLOT
+const sc = document.getElementById('scatter'), ctx = sc.getContext('2d');
+
+function pca2D(embs) {
+  const n = embs.length, d = embs[0].length;
+  if (n < 2) return embs.map(() => [0,0]);
+  const mean = new Array(d).fill(0);
+  for (const e of embs) for (let i=0;i<d;i++) mean[i]+=e[i]/n;
+  const X = embs.map(e => e.map((v,i)=>v-mean[i]));
+  function powerIter(X,excl) {
+    let v = new Array(d).fill(0).map(()=>Math.random()-.5);
+    if (excl) { let dot=v.reduce((s,vi,i)=>s+vi*excl[i],0); v=v.map((vi,i)=>vi-dot*excl[i]); }
+    let nrm = Math.sqrt(v.reduce((s,vi)=>s+vi*vi,0));
+    v = v.map(vi=>vi/nrm);
+    for (let it=0;it<200;it++) {
+      const Xv=X.map(xi=>xi.reduce((s,xij,j)=>s+xij*v[j],0));
+      const nv=new Array(d).fill(0);
+      for (let k=0;k<n;k++) for (let j=0;j<d;j++) nv[j]+=X[k][j]*Xv[k];
+      if (excl) { let dot=nv.reduce((s,vi,i)=>s+vi*excl[i],0); for (let i=0;i<d;i++) nv[i]-=dot*excl[i]; }
+      nrm=Math.sqrt(nv.reduce((s,vi)=>s+vi*vi,0));
+      if (nrm<1e-10) break;
+      const prev=v.slice(); v=nv.map(vi=>vi/nrm);
+      if (v.reduce((s,vi,i)=>s+(vi-prev[i])**2,0)<1e-12) break;
+    }
+    return v;
+  }
+  const pc1=powerIter(X,null), pc2=powerIter(X,pc1);
+  return X.map(x=>[x.reduce((s,v,i)=>s+v*pc1[i],0),x.reduce((s,v,i)=>s+v*pc2[i],0)]);
+}
+
+function resize() { const r=sc.parentElement.getBoundingClientRect(); sc.width=r.width; sc.height=r.height; }
+window.addEventListener('resize', resize);
+
+function w2c(wx,wy) {
+  const P=70,W=sc.width,H=sc.height,rx=bounds.maxX-bounds.minX||1,ry=bounds.maxY-bounds.minY||1;
+  return [P+((wx-bounds.minX)/rx)*(W-2*P), H-P-((wy-bounds.minY)/ry)*(H-2*P)];
+}
+
+function drawFrame() {
+  ctx.clearRect(0,0,sc.width,sc.height);
+  ctx.fillStyle='#07070f'; ctx.fillRect(0,0,sc.width,sc.height);
+  ctx.strokeStyle='#0e0e1e'; ctx.lineWidth=1;
+  for (let i=0;i<=8;i++) {
+    const tx=70+(i/8)*(sc.width-140),ty=70+(i/8)*(sc.height-140);
+    ctx.beginPath();ctx.moveTo(tx,70);ctx.lineTo(tx,sc.height-70);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(70,ty);ctx.lineTo(sc.width-70,ty);ctx.stroke();
+  }
+  ctx.fillStyle='#1a1a38'; ctx.font='11px Fira Code,monospace';
+  ctx.fillText('PC₁ →',sc.width/2-40,sc.height-18);
+  ctx.save();ctx.translate(18,sc.height/2+50);ctx.rotate(-Math.PI/2);ctx.fillText('PC₂ →',0,0);ctx.restore();
+  ctx.fillStyle='#151530'; ctx.font='12px Fira Code,monospace';
+  ctx.fillText('2D PCA Projection  ·  Semantic Space',80,28);
+
+  if (queryPt && hitIds.size>0) {
+    const [qx,qy]=w2c(queryPt.x,queryPt.y);
+    for (const pt of pcaPoints) {
+      if (!hitIds.has(pt.item.id)) continue;
+      const [px,py]=w2c(pt.x,pt.y);
+      ctx.strokeStyle='rgba(108,99,255,0.18)'; ctx.lineWidth=1; ctx.setLineDash([4,4]);
+      ctx.beginPath();ctx.moveTo(qx,qy);ctx.lineTo(px,py);ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+  for (const pt of pcaPoints) {
+    const [cx,cy]=w2c(pt.x,pt.y);
+    const col=getCatColor(pt.item.category);
+    const isHit=hitIds.has(pt.item.id), r=isHit?10:7;
+    if (isHit) {
+      const pr=r+7+Math.sin(pulse)*3.5;
+      ctx.beginPath();ctx.arc(cx,cy,pr,0,2*Math.PI);
+      ctx.strokeStyle=col+'55';ctx.lineWidth=1.5;ctx.stroke();
+    }
+    const grd=ctx.createRadialGradient(cx,cy,0,cx,cy,r*3);
+    grd.addColorStop(0,col+(isHit?'bb':'88'));grd.addColorStop(1,'transparent');
+    ctx.beginPath();ctx.arc(cx,cy,r*3,0,2*Math.PI);ctx.fillStyle=grd;ctx.fill();
+    ctx.beginPath();ctx.arc(cx,cy,r,0,2*Math.PI);ctx.fillStyle=col;ctx.fill();
+    if (hoverItem&&hoverItem.id===pt.item.id) {
+      ctx.beginPath();ctx.arc(cx,cy,r+5,0,2*Math.PI);ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.stroke();
+    }
+  }
+  if (queryPt) {
+    const [qx,qy]=w2c(queryPt.x,queryPt.y);
+    ctx.save();ctx.translate(qx,qy);
+    ctx.shadowColor='#fff';ctx.shadowBlur=18;
+    ctx.beginPath();
+    for (let i=0;i<10;i++){const a=(i*Math.PI/5)-Math.PI/2,rr=i%2===0?13:5;if(i===0)ctx.moveTo(Math.cos(a)*rr,Math.sin(a)*rr);else ctx.lineTo(Math.cos(a)*rr,Math.sin(a)*rr);}
+    ctx.closePath();ctx.fillStyle='#fff';ctx.fill();
+    ctx.shadowBlur=0;ctx.restore();
+    ctx.fillStyle='#aaaacc';ctx.font='10px Fira Code,monospace';ctx.fillText('query',qx+16,qy+4);
+  }
+  if (!pcaPoints.length) {
+    ctx.fillStyle='#1a1a38';ctx.font='13px Fira Code,monospace';ctx.textAlign='center';
+    ctx.fillText('Connecting to VectorDB…',sc.width/2,sc.height/2);ctx.textAlign='left';
+  }
+  pulse+=0.05;
+  requestAnimationFrame(drawFrame);
+}
+
+sc.addEventListener('mousemove', e => {
+  const rect=sc.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  hoverItem=null; let best=18;
+  for (const pt of pcaPoints) {
+    const [cx,cy]=w2c(pt.x,pt.y),d=Math.hypot(mx-cx,my-cy);
+    if (d<best){best=d;hoverItem=pt.item;}
+  }
+  const tip=document.getElementById('tip');
+  if (hoverItem) {
+    const col=getCatColor(hoverItem.category);
+    tip.style.display='block';tip.style.left=(e.clientX+14)+'px';tip.style.top=(e.clientY-8)+'px';
+    tip.innerHTML=`<span style="color:${col}">[${hoverItem.category.toUpperCase()}]</span><br>${hoverItem.metadata}`;
+  } else tip.style.display='none';
+});
+sc.addEventListener('mouseleave',()=>{hoverItem=null;document.getElementById('tip').style.display='none';});
+
+async function loadItems() {
+  try {
+    const r = await fetch(API+'/items');
+    allItems = await r.json();
+    if (allItems.length >= 2) {
+      const coords = pca2D(allItems.map(v=>v.embedding));
+      pcaPoints = allItems.map((item,i)=>({x:coords[i][0],y:coords[i][1],item}));
+      let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+      for (const p of pcaPoints){x0=Math.min(x0,p.x);x1=Math.max(x1,p.x);y0=Math.min(y0,p.y);y1=Math.max(y1,p.y);}
+      const px=(x1-x0)*.18||.1,py=(y1-y0)*.18||.1;
+      bounds={minX:x0-px,maxX:x1+px,minY:y0-py,maxY:y1+py};
+    }
+  } catch(_) {}
+}
+
+// CENTER TAB SWITCH
+function switchCenterTab(name) {
+  document.querySelectorAll('.ctab').forEach((t,i) => t.classList.toggle('on', ['library','search'][i] === name));
+  document.getElementById('libraryPane').classList.toggle('hidden', name !== 'library');
+  document.getElementById('searchPane').classList.toggle('hidden', name !== 'search');
+}
+
+// ALGO SELECT
+function setAlgo(el) {
+  document.querySelectorAll('.algo-btn').forEach(b => b.classList.remove('on'));
+  el.classList.add('on'); selAlgo = el.dataset.algo;
+}
+
+// TEXT TO 16D EMBEDDING
+const KW = {
+  cs:['algorithm','data','tree','graph','array','linked','hash','stack','queue','sort','binary','dynamic','programming','recursion','complexity','pointer','node','search','insert','bfs','dfs','heap','trie'],
+  math:['calculus','matrix','probability','theorem','integral','derivative','linear','algebra','equation','function','prime','modular','combinatorics','permutation','eigenvalue','statistics','proof'],
+  food:['food','pizza','sushi','ramen','pasta','recipe','cook','eat','restaurant','dish','ingredient','flavor','spice','noodle','bread','croissant','taco','fish','rice','soup'],
+  sports:['sport','basketball','football','tennis','chess','swim','game','play','score','team','athlete','competition','match','tournament','olympic','dribble','tackle','serve']
+};
+function textToEmbedding(text) {
+  const t = text.toLowerCase(), ws = t.split(/\s+/);
+  const s = {cs:0,math:0,food:0,sports:0};
+  for (const w of ws)
+    for (const [cat,kws] of Object.entries(KW))
+      for (const kw of kws) if (w.includes(kw)||kw.startsWith(w)) { s[cat]+=0.35; break; }
+  const mx = Math.max(...Object.values(s),0.01);
+  const n = v => Math.min(v/mx*0.88,0.94);
+  const jitter = () => (Math.random()-.5)*.04;
+  const emb = new Array(16).fill(0.08);
+  const fill = (i,score) => {
+    if (score<.01) return;
+    const b=n(score);
+    emb[i]=Math.max(.05,b+jitter());emb[i+1]=Math.max(.05,b+jitter());
+    emb[i+2]=Math.max(.05,b*.92+jitter());emb[i+3]=Math.max(.05,b*.87+jitter());
+  };
+  fill(0,s.cs);fill(4,s.math);fill(8,s.food);fill(12,s.sports);
+  return emb;
+}
+
+// SEARCH
+async function runSearch() {
+  const text = document.getElementById('qInput').value.trim(); if(!text) return;
+  const emb = textToEmbedding(text), k = parseInt(document.getElementById('kSlider').value);
+  const metric = document.getElementById('metric').value;
+  try {
+    const r = await fetch(`${API}/search?v=${emb.join(',')}&k=${k}&metric=${metric}&algo=${selAlgo}`);
+    const data = await r.json();
+    searchResults = data.results||[];
+    hitIds = new Set(searchResults.map(r=>r.id));
+    if (searchResults.length>0){
+      let sx=0,sy=0,sw=0;
+      for (let i=0;i<Math.min(3,searchResults.length);i++){
+        const pt=pcaPoints.find(p=>p.item.id===searchResults[i].id);
+        if(pt){const w=1/(i+1);sx+=pt.x*w;sy+=pt.y*w;sw+=w;}
+      }
+      if(sw>0)queryPt={x:sx/sw+(Math.random()-.5)*.015,y:sy/sw+(Math.random()-.5)*.015};
+      else queryPt=null;
+    } else {
+      queryPt=null;
+    }
+    const us = data.latencyUs||0;
+    document.getElementById('latBig').textContent = us<1000?us+' μs':(us/1000).toFixed(2)+' ms';
+    document.getElementById('latSub').textContent = selAlgo.toUpperCase()+'  ·  '+metric+'  ·  k='+k;
+    renderResults(searchResults);
+    drawVecChart(emb);
+  } catch(_){ alert('Cannot reach server — is it running on :8080?'); }
+}
+document.getElementById('qInput').addEventListener('keydown', e => { if(e.key==='Enter') runSearch(); });
+
+function renderResults(results) {
+  if (!results||!results.length) { document.getElementById('results').innerHTML='<div style="color:var(--muted);font-size:10px">No results</div>'; return; }
+  document.getElementById('results').innerHTML = results.map((r,i) => {
+    const col = getCatColor(r.category);
+    return `<div class="rcard">
+      <div class="rrank">#${i+1} NEAREST</div>
+      <div class="rmeta">${r.metadata}</div>
+      <div class="rfoot">
+        <span class="rcat" style="background:${col}18;color:${col};border:1px solid ${col}44">${r.category.toUpperCase()}</span>
+        <span class="rdist">dist: ${r.distance.toFixed(5)}</span>
+        <button class="del" onclick="deleteItem(${r.id})">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function drawVecChart(emb) {
+  const vc = document.getElementById('vecCvs'), W = vc.parentElement.clientWidth;
+  vc.width = W; const vx = vc.getContext('2d');
+  vx.clearRect(0,0,W,68); vx.fillStyle='#07070f'; vx.fillRect(0,0,W,68);
+  const bw = (W-4)/DIMS;
+  for (let i=0;i<DIMS;i++) {
+    const h=emb[i]*55,x=2+i*bw,col=DIM_COL[i];
+    vx.shadowColor=col;vx.shadowBlur=4;vx.fillStyle=col+'aa';vx.fillRect(x+1,58-h,bw-2,h);
+  }
+  vx.shadowBlur=0;vx.font='8px monospace';vx.textAlign='center';
+  [['CS',0],['MATH',4],['FOOD',8],['SPORT',12]].forEach(([lbl,gi],i) => {
+    vx.fillStyle=Object.values(COL)[i]+'77';vx.fillText(lbl,2+(gi+1.5)*bw,67);
+  });
+  vx.textAlign='left';
+}
+
+async function runBenchmark() {
+  const text = document.getElementById('qInput').value.trim()||'binary tree algorithm';
+  const emb = textToEmbedding(text), metric = document.getElementById('metric').value;
+  try {
+    const r = await fetch(`${API}/benchmark?v=${emb.join(',')}&k=5&metric=${metric}`);
+    const d = await r.json();
+    document.getElementById('benchSec').style.display='block';
+    const mx = Math.max(d.bruteforceUs,d.kdtreeUs,d.hnswUs,1);
+    document.getElementById('benchBars').innerHTML = [
+      {lbl:'Brute Force',us:d.bruteforceUs,col:'#f38ba8'},
+      {lbl:'KD-Tree',us:d.kdtreeUs,col:'#89dceb'},
+      {lbl:'HNSW',us:d.hnswUs,col:'#b388ff'},
+    ].map(({lbl,us,col}) => {
+      const pct=Math.max((us/mx)*100,2),disp=us<1000?us+' μs':(us/1000).toFixed(2)+' ms';
+      return `<div class="brow"><div class="blabel"><span style="color:${col}">${lbl}</span><span style="color:var(--muted)">${disp}</span></div><div class="btrack"><div class="bfill" style="width:${pct}%;background:${col}"></div></div></div>`;
+    }).join('');
+  } catch(_){}
+}
+
+async function deleteItem(id) {
+  try {
+    await fetch(`${API}/delete/${id}`,{method:'DELETE'});
+    searchResults = searchResults.filter(r=>r.id!==id);
+    renderResults(searchResults);
+    loadHNSW(); loadStats();
+  } catch(_){}
+}
+
+async function addVector() {
+  const meta = document.getElementById('addMeta').value.trim(), cat = document.getElementById('addCat').value;
+  if(!meta) return;
+  const emb = textToEmbedding(meta+' '+cat);
+  try {
+    await fetch(API+'/insert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({metadata:meta,category:cat,embedding:emb})});
+    document.getElementById('addMeta').value='';
+    loadItems().then(loadHNSW); loadStats();
+  } catch(_){}
+}
+
+// FILE UPLOAD
+const uploadZone = document.getElementById('uploadZone');
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
+uploadZone.addEventListener('drop', e => { e.preventDefault(); uploadZone.classList.remove('drag'); [...e.dataTransfer.files].forEach(uploadFile); });
+
+function handleFileSelect(input) {
+  [...input.files].forEach(uploadFile);
+  input.value='';
+}
+
+async function uploadFile(file) {
+  const statusEl = document.getElementById('uploadStatus');
+  const statusText = document.getElementById('uploadStatusText');
+  statusEl.classList.add('show');
+  statusText.textContent = `Embedding ${file.name}…`;
+
+  const formData = new FormData();
+  formData.append('file', file, file.name);
+  formData.append('title', file.name.replace(/\.[^.]+$/,''));
+
+  try {
+    const r = await fetch(API+'/doc/upload', {method:'POST', body: formData});
+    const d = await r.json();
+    if (d.error) {
+      statusText.textContent = '✗ '+d.error;
+      setTimeout(() => statusEl.classList.remove('show'), 4000);
+    } else {
+      statusText.textContent = `✓ ${d.title} — ${d.chunks} chunks embedded`;
+      setTimeout(() => statusEl.classList.remove('show'), 3000);
+      loadDocList(); loadStats(); loadItems().then(loadHNSW);
+    }
+  } catch(_) {
+    statusText.textContent = '✗ Server error — is the backend running?';
+    setTimeout(() => statusEl.classList.remove('show'), 4000);
+  }
+}
+
+async function clearAllDocs() {
+  if (!confirm('Delete all documents? This cannot be undone.')) return;
+  try {
+    await fetch(API+'/doc/delete/all',{method:'DELETE'});
+    loadDocList(); loadStats(); loadHNSW();
+  } catch(_){}
+}
+
+// DOCUMENT TEXT INSERT
+async function insertDocument() {
+  const title = document.getElementById('docTitle').value.trim();
+  const text = document.getElementById('docText').value.trim();
+  const btn = document.getElementById('insertDocBtn');
+  const status = document.getElementById('insertStatus');
+  if(!title||!text) { status.textContent='⚠ Need both title and text.'; return; }
+  btn.disabled=true; btn.textContent='Embedding…';
+  status.innerHTML='<span style="color:var(--muted)">Calling Ollama…</span>';
+  try {
+    const r = await fetch(API+'/doc/insert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,text})});
+    const d = await r.json();
+    if (d.error) {
+      status.innerHTML=`<span style="color:var(--red)">✗ ${d.error}</span>`;
+    } else {
+      status.innerHTML=`<span style="color:var(--green)">✓ ${d.chunks} chunk(s) · ${d.dims}D</span>`;
+      document.getElementById('docTitle').value='';
+      document.getElementById('docText').value='';
+      const emb16 = textToEmbedding(title + ' ' + text);
+      fetch(API+'/insert', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({metadata: title, category: 'doc', embedding: emb16}) }).then(() => { loadItems().then(loadHNSW); });
+      loadDocList(); loadStats(); checkOllamaStatus();
+    }
+  } catch(_) { status.innerHTML='<span style="color:var(--red)">✗ Server error</span>'; }
+  btn.disabled=false; btn.textContent='⚡ EMBED & INSERT';
+}
+
+// DOC LIST
+async function loadDocList() {
+  try {
+    const r = await fetch(API+'/doc/list'), docs = await r.json();
+    document.getElementById('docCountLabel').textContent = docs.length;
+    if (!docs.length) {
+      document.getElementById('docList').innerHTML='<div class="empty-lib"><div class="empty-icon">📄</div>No documents yet.<br>Upload files or paste text above.</div>';
+      return;
+    }
+    document.getElementById('docList').innerHTML = docs.map(d=>`
+      <div class="dcard">
+        <div class="dcard-title">${d.title}</div>
+        <div class="dcard-preview">${d.preview}</div>
+        <div class="dcard-foot">
+          <span class="dcard-meta">${d.words} words</span>
+          <button class="del" onclick="deleteDoc(${d.id})">✕</button>
+        </div>
+      </div>`).join('');
+  } catch(_){}
+}
+
+async function deleteDoc(id) {
+  try {
+    await fetch(`${API}/doc/delete/${id}`,{method:'DELETE'});
+    loadDocList(); loadStats();
+  } catch(_){}
+}
+
+// STATS
+async function loadStats() {
+  try {
+    const r = await fetch(API+'/status'), d = await r.json();
+    document.getElementById('statDocs').textContent = d.docCount;
+    document.getElementById('statDemo').textContent = d.demoCount;
+    document.getElementById('statDims').textContent = d.docDims||'—';
+    document.getElementById('statsLabel').textContent = d.demoCount+' demo · '+d.docCount+' docs';
+  } catch(_){}
+}
+
+// HNSW LAYERS
+async function loadHNSW() {
+  try {
+    const r = await fetch(API+'/hnsw-info'), d = await r.json();
+    const maxN = d.nodesPerLayer[0]||1;
+    document.getElementById('layers').innerHTML = d.nodesPerLayer.map((cnt,lyr) => {
+      const pct=Math.max((cnt/maxN)*100,2),edg=d.edgesPerLayer[lyr]||0;
+      return `<div class="lrow"><div class="lnum">L${lyr}</div><div class="ltrack"><div class="lfill" style="width:${pct}%"></div></div><div class="lcount">${cnt}n · ${edg}e</div></div>`;
+    }).join('')||'<div style="color:var(--muted);font-size:10px">Empty</div>';
+  } catch(_){}
+}
+
+// OLLAMA STATUS
+async function checkOllamaStatus() {
+  try {
+    const r = await fetch(API+'/status'), d = await r.json();
+    const badge = document.getElementById('ollamaBadge');
+    const box = document.getElementById('ollamaStatus');
+    if (d.ollamaAvailable) {
+      badge.className='badge ok'; badge.textContent='OLLAMA ✓';
+      box.className='status-card ok';
+      box.innerHTML=`<div class="stat-row"><span class="stat-label">Status</span><span style="color:var(--green)">● Online</span></div>`+
+        `<div class="stat-row"><span class="stat-label">Embed model</span><span class="stat-val">${d.embedModel}</span></div>`+
+        `<div class="stat-row"><span class="stat-label">Gen model</span><span class="stat-val">${d.genModel}</span></div>`;
+      document.getElementById('askBtn').disabled=false;
+    } else {
+      badge.className='badge err'; badge.textContent='OLLAMA ✗';
+      box.className='status-card err';
+      box.innerHTML=`<div class="stat-row"><span class="stat-label">Status</span><span style="color:var(--red)">● Offline</span></div>`+
+        `<div style="font-size:9px;color:var(--muted);margin-top:8px;line-height:1.8">1. Install from ollama.com<br>2. ollama pull nomic-embed-text<br>3. ollama pull llama3.2</div>`;
+      document.getElementById('askBtn').disabled=true;
+    }
+  } catch(_){}
+}
+
+// ASK AI
+document.getElementById('ragQuestion').addEventListener('keydown', e => { if(e.key==='Enter'&&e.ctrlKey) askAI(); });
+
+async function askAI() {
+  const question = document.getElementById('ragQuestion').value.trim();
+  if(!question) return;
+  const k = parseInt(document.getElementById('ragK').value);
+  const btn = document.getElementById('askBtn');
+  btn.disabled=true; btn.textContent='Thinking…';
+
+  const history = document.getElementById('chatHistory');
+  history.innerHTML='';
+
+  const qDiv = document.createElement('div'); qDiv.className='chat-q';
+  qDiv.textContent=question; history.appendChild(qDiv);
+
+  const thinkDiv = document.createElement('div'); thinkDiv.className='thinking';
+  thinkDiv.innerHTML='<div class="spinner"></div>Retrieving context &amp; generating answer…';
+  history.appendChild(thinkDiv);
+  history.scrollTop=history.scrollHeight;
+
+  try {
+    const r = await fetch(API+'/doc/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question,k})});
+    const d = await r.json();
+    thinkDiv.remove();
+
+    if (d.contexts && d.contexts.length > 0) {
+      hitIds = new Set();
+      let sx=0, sy=0, sw=0;
+      d.contexts.forEach((ctx, i) => {
+        const pt = pcaPoints.find(p => ctx.title.startsWith(p.item.metadata));
+        if (pt) {
+          hitIds.add(pt.item.id);
+          const w = 1/(i+1); sx += pt.x*w; sy += pt.y*w; sw += w;
+        }
+      });
+      if (sw > 0) queryPt = {x: sx/sw + (Math.random()-.5)*.015, y: sy/sw + (Math.random()-.5)*.015};
+      else queryPt = null;
+    } else {
+      hitIds = new Set();
+      const emb16 = textToEmbedding(question);
+      try {
+        const res2 = await fetch(`${API}/search?v=${emb16.join(',')}&k=3&metric=cosine&algo=hnsw`);
+        const data2 = await res2.json();
+        if (data2.results && data2.results.length>0) {
+          let sx=0,sy=0,sw=0;
+          for (let i=0;i<Math.min(3,data2.results.length);i++) {
+            const pt=pcaPoints.find(p=>p.item.id===data2.results[i].id);
+            if(pt){
+              hitIds.add(pt.item.id);
+              const w=1/(i+1);sx+=pt.x*w;sy+=pt.y*w;sw+=w;
+            }
+          }
+          if(sw>0) queryPt={x:sx/sw+(Math.random()-.5)*.015,y:sy/sw+(Math.random()-.5)*.015};
+          else queryPt=null;
+        } else queryPt=null;
+      } catch(_) { queryPt=null; }
+    }
+
+    const aDiv = document.createElement('div'); aDiv.className='chat-a';
+
+    if (d.error) {
+      aDiv.innerHTML=`<div class="chat-a-label">ERROR</div><div class="chat-a-text" style="color:var(--red)">${d.error}</div>`;
+    } else {
+      aDiv.innerHTML=`<div class="chat-a-label">🤖 ${d.model||'llm'}</div>`+
+        `<div class="chat-a-text" id="typeTarget"></div>`+
+        `<div class="chat-ctx">`+
+          `<div class="chat-ctx-label">Retrieved context (${d.contexts.length} chunks)</div>`+
+          d.contexts.map((c,i)=>`<span class="ctx-chip" onclick="toggleCtx(${i})">#${i+1} ${c.title} · ${c.distance.toFixed(3)}</span>`+
+            `<div class="ctx-expand" id="ctx-${i}">${c.text}</div>`).join('')+
+        `</div>`;
+      history.appendChild(aDiv);
+
+      const target = aDiv.querySelector('#typeTarget');
+      target.classList.add('typing');
+      const full = d.answer; let i=0;
+      const timer = setInterval(() => {
+        if(i>=full.length){clearInterval(timer);target.classList.remove('typing');return;}
+        target.textContent+=full.slice(i,i+3); i+=3;
+        history.scrollTop=history.scrollHeight;
+      },18);
+    }
+
+    if (d.error) history.appendChild(aDiv);
+
+  } catch(_) {
+    thinkDiv.remove();
+    const err = document.createElement('div'); err.className='chat-a';
+    err.innerHTML='<div class="chat-a-label">ERROR</div><div class="chat-a-text" style="color:var(--red)">Server error — is the backend running?</div>';
+    history.appendChild(err);
+  }
+
+  document.getElementById('ragQuestion').value='';
+  btn.disabled=false; btn.textContent='🤖 ASK AI';
+  history.scrollTop=history.scrollHeight;
+}
+
+function toggleCtx(i) {
+  const el = document.getElementById('ctx-'+i);
+  el.style.display = el.style.display==='block'?'none':'block';
+}
+
+// BOOT
+resize();
+drawFrame();
+loadItems().then(loadHNSW);
+checkOllamaStatus();
+loadDocList();
+loadStats();
+</script>
+</body>
+</html>
+</file>
+
+<file path="build.gradle.kts">
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+
+plugins {
+    java
+    id("com.github.johnrengelman.shadow") version "8.1.1"
+}
+
+group = "com.vectordb"
+version = "1.0"
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation("com.google.code.gson:gson:2.10.1")
+    implementation("org.apache.pdfbox:pdfbox:3.0.2")
+}
+
+tasks.withType<ShadowJar> {
+    archiveBaseName.set("VectorDB")
+    archiveClassifier.set("all")
+    archiveVersion.set("")
+    manifest {
+        attributes["Main-Class"] = "com.vectordb.VectorDB"
+    }
+}
+
+tasks.build {
+    dependsOn(tasks.shadowJar)
+}
+</file>
+
+<file path="gradlew">
+#!/bin/sh
+
+#
+# Copyright © 2015 the original authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+##############################################################################
+#
+#   Gradle start up script for POSIX generated by Gradle.
+#
+#   Important for running:
+#
+#   (1) You need a POSIX-compliant shell to run this script. If your /bin/sh is
+#       noncompliant, but you have some other compliant shell such as ksh or
+#       bash, then to run this script, type that shell name before the whole
+#       command line, like:
+#
+#           ksh Gradle
+#
+#       Busybox and similar reduced shells will NOT work, because this script
+#       requires all of these POSIX shell features:
+#         * functions;
+#         * expansions «$var», «${var}», «${var:-default}», «${var+SET}»,
+#           «${var#prefix}», «${var%suffix}», and «$( cmd )»;
+#         * compound commands having a testable exit status, especially «case»;
+#         * various built-in commands including «command», «set», and «ulimit».
+#
+#   Important for patching:
+#
+#   (2) This script targets any POSIX shell, so it avoids extensions provided
+#       by Bash, Ksh, etc; in particular arrays are avoided.
+#
+#       The "traditional" practice of packing multiple parameters into a
+#       space-separated string is a well documented source of bugs and security
+#       problems, so this is (mostly) avoided, by progressively accumulating
+#       options in "$@", and eventually passing that to Java.
+#
+#       Where the inherited environment variables (DEFAULT_JVM_OPTS, JAVA_OPTS,
+#       and GRADLE_OPTS) rely on word-splitting, this is performed explicitly;
+#       see the in-line comments for details.
+#
+#       There are tweaks for specific operating systems such as AIX, CygWin,
+#       Darwin, MinGW, and NonStop.
+#
+#   (3) This script is generated from the Groovy template
+#       https://github.com/gradle/gradle/blob/HEAD/platforms/jvm/plugins-application/src/main/resources/org/gradle/api/internal/plugins/unixStartScript.txt
+#       within the Gradle project.
+#
+#       You can find Gradle at https://github.com/gradle/gradle/.
+#
+##############################################################################
+
+# Attempt to set APP_HOME
+
+# Resolve links: $0 may be a link
+app_path=$0
+
+# Need this for daisy-chained symlinks.
+while
+    APP_HOME=${app_path%"${app_path##*/}"}  # leaves a trailing /; empty if no leading path
+    [ -h "$app_path" ]
+do
+    ls=$( ls -ld "$app_path" )
+    link=${ls#*' -> '}
+    case $link in             #(
+      /*)   app_path=$link ;; #(
+      *)    app_path=$APP_HOME$link ;;
+    esac
+done
+
+# This is normally unused
+# shellcheck disable=SC2034
+APP_BASE_NAME=${0##*/}
+# Discard cd standard output in case $CDPATH is set (https://github.com/gradle/gradle/issues/25036)
+APP_HOME=$( cd -P "${APP_HOME:-./}" > /dev/null && printf '%s\n' "$PWD" ) || exit
+
+# Use the maximum available, or set MAX_FD != -1 to use that value.
+MAX_FD=maximum
+
+warn () {
+    echo "$*"
+} >&2
+
+die () {
+    echo
+    echo "$*"
+    echo
+    exit 1
+} >&2
+
+# OS specific support (must be 'true' or 'false').
+cygwin=false
+msys=false
+darwin=false
+nonstop=false
+case "$( uname )" in                #(
+  CYGWIN* )         cygwin=true  ;; #(
+  Darwin* )         darwin=true  ;; #(
+  MSYS* | MINGW* )  msys=true    ;; #(
+  NONSTOP* )        nonstop=true ;;
+esac
+
+
+
+# Determine the Java command to use to start the JVM.
+if [ -n "$JAVA_HOME" ] ; then
+    if [ -x "$JAVA_HOME/jre/sh/java" ] ; then
+        # IBM's JDK on AIX uses strange locations for the executables
+        JAVACMD=$JAVA_HOME/jre/sh/java
+    else
+        JAVACMD=$JAVA_HOME/bin/java
+    fi
+    if [ ! -x "$JAVACMD" ] ; then
+        die "ERROR: JAVA_HOME is set to an invalid directory: $JAVA_HOME
+
+Please set the JAVA_HOME variable in your environment to match the
+location of your Java installation."
+    fi
+else
+    JAVACMD=java
+    if ! command -v java >/dev/null 2>&1
+    then
+        die "ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.
+
+Please set the JAVA_HOME variable in your environment to match the
+location of your Java installation."
+    fi
+fi
+
+# Increase the maximum file descriptors if we can.
+if ! "$cygwin" && ! "$darwin" && ! "$nonstop" ; then
+    case $MAX_FD in #(
+      max*)
+        # In POSIX sh, ulimit -H is undefined. That's why the result is checked to see if it worked.
+        # shellcheck disable=SC2039,SC3045
+        MAX_FD=$( ulimit -H -n ) ||
+            warn "Could not query maximum file descriptor limit"
+    esac
+    case $MAX_FD in  #(
+      '' | soft) :;; #(
+      *)
+        # In POSIX sh, ulimit -n is undefined. That's why the result is checked to see if it worked.
+        # shellcheck disable=SC2039,SC3045
+        ulimit -n "$MAX_FD" ||
+            warn "Could not set maximum file descriptor limit to $MAX_FD"
+    esac
+fi
+
+# Collect all arguments for the java command, stacking in reverse order:
+#   * args from the command line
+#   * the main class name
+#   * -classpath
+#   * -D...appname settings
+#   * --module-path (only if needed)
+#   * DEFAULT_JVM_OPTS, JAVA_OPTS, and GRADLE_OPTS environment variables.
+
+# For Cygwin or MSYS, switch paths to Windows format before running java
+if "$cygwin" || "$msys" ; then
+    APP_HOME=$( cygpath --path --mixed "$APP_HOME" )
+
+    JAVACMD=$( cygpath --unix "$JAVACMD" )
+
+    # Now convert the arguments - kludge to limit ourselves to /bin/sh
+    for arg do
+        if
+            case $arg in                                #(
+              -*)   false ;;                            # don't mess with options #(
+              /?*)  t=${arg#/} t=/${t%%/*}              # looks like a POSIX filepath
+                    [ -e "$t" ] ;;                      #(
+              *)    false ;;
+            esac
+        then
+            arg=$( cygpath --path --ignore --mixed "$arg" )
+        fi
+        # Roll the args list around exactly as many times as the number of
+        # args, so each arg winds up back in the position where it started, but
+        # possibly modified.
+        #
+        # NB: a `for` loop captures its iteration list before it begins, so
+        # changing the positional parameters here affects neither the number of
+        # iterations, nor the values presented in `arg`.
+        shift                   # remove old arg
+        set -- "$@" "$arg"      # push replacement arg
+    done
+fi
+
+
+# Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
+DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
+
+# Collect all arguments for the java command:
+#   * DEFAULT_JVM_OPTS, JAVA_OPTS, and optsEnvironmentVar are not allowed to contain shell fragments,
+#     and any embedded shellness will be escaped.
+#   * For example: A user cannot expect ${Hostname} to be expanded, as it is an environment variable and will be
+#     treated as '${Hostname}' itself on the command line.
+
+set -- \
+        "-Dorg.gradle.appname=$APP_BASE_NAME" \
+        -jar "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" \
+        "$@"
+
+# Stop when "xargs" is not available.
+if ! command -v xargs >/dev/null 2>&1
+then
+    die "xargs is not available"
+fi
+
+# Use "xargs" to parse quoted args.
+#
+# With -n1 it outputs one arg per line, with the quotes and backslashes removed.
+#
+# In Bash we could simply go:
+#
+#   readarray ARGS < <( xargs -n1 <<<"$var" ) &&
+#   set -- "${ARGS[@]}" "$@"
+#
+# but POSIX shell has neither arrays nor command substitution, so instead we
+# post-process each arg (as a line of input to sed) to backslash-escape any
+# character that might be a shell metacharacter, then use eval to reverse
+# that process (while maintaining the separation between arguments), and wrap
+# the whole thing up as a single "set" statement.
+#
+# This will of course break if any of these variables contains a newline or
+# an unmatched quote.
+#
+
+eval "set -- $(
+        printf '%s\n' "$DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS" |
+        xargs -n1 |
+        sed ' s~[^-[:alnum:]+,./:=@_]~\\&~g; ' |
+        tr '\n' ' '
+    )" '"$@"'
+
+exec "$JAVACMD" "$@"
+</file>
+
+<file path="gradlew.bat">
+@rem
+@rem Copyright 2015 the original author or authors.
+@rem
+@rem Licensed under the Apache License, Version 2.0 (the "License");
+@rem you may not use this file except in compliance with the License.
+@rem You may obtain a copy of the License at
+@rem
+@rem      https://www.apache.org/licenses/LICENSE-2.0
+@rem
+@rem Unless required by applicable law or agreed to in writing, software
+@rem distributed under the License is distributed on an "AS IS" BASIS,
+@rem WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+@rem See the License for the specific language governing permissions and
+@rem limitations under the License.
+@rem
+@rem SPDX-License-Identifier: Apache-2.0
+@rem
+
+@if "%DEBUG%"=="" @echo off
+@rem ##########################################################################
+@rem
+@rem  Gradle startup script for Windows
+@rem
+@rem ##########################################################################
+
+@rem Set local scope for the variables with windows NT shell
+if "%OS%"=="Windows_NT" setlocal
+
+set DIRNAME=%~dp0
+if "%DIRNAME%"=="" set DIRNAME=.
+@rem This is normally unused
+set APP_BASE_NAME=%~n0
+set APP_HOME=%DIRNAME%
+
+@rem Resolve any "." and ".." in APP_HOME to make it shorter.
+for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
+
+@rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
+set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
+
+@rem Find java.exe
+if defined JAVA_HOME goto findJavaFromJavaHome
+
+set JAVA_EXE=java.exe
+%JAVA_EXE% -version >NUL 2>&1
+if %ERRORLEVEL% equ 0 goto execute
+
+echo. 1>&2
+echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH. 1>&2
+echo. 1>&2
+echo Please set the JAVA_HOME variable in your environment to match the 1>&2
+echo location of your Java installation. 1>&2
+
+goto fail
+
+:findJavaFromJavaHome
+set JAVA_HOME=%JAVA_HOME:"=%
+set JAVA_EXE=%JAVA_HOME%/bin/java.exe
+
+if exist "%JAVA_EXE%" goto execute
+
+echo. 1>&2
+echo ERROR: JAVA_HOME is set to an invalid directory: %JAVA_HOME% 1>&2
+echo. 1>&2
+echo Please set the JAVA_HOME variable in your environment to match the 1>&2
+echo location of your Java installation. 1>&2
+
+goto fail
+
+:execute
+@rem Setup the command line
+
+
+
+@rem Execute Gradle
+"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -jar "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar" %*
+
+:end
+@rem End local scope for the variables with windows NT shell
+if %ERRORLEVEL% equ 0 goto mainEnd
+
+:fail
+rem Set variable GRADLE_EXIT_CONSOLE if you need the _script_ return code instead of
+rem the _cmd.exe /c_ return code!
+set EXIT_CODE=%ERRORLEVEL%
+if %EXIT_CODE% equ 0 set EXIT_CODE=1
+if not ""=="%GRADLE_EXIT_CONSOLE%" exit %EXIT_CODE%
+exit /b %EXIT_CODE%
+
+:mainEnd
+if "%OS%"=="Windows_NT" endlocal
+
+:omega
+</file>
+
+<file path="settings.gradle.kts">
+rootProject.name = "VectorDB"
+</file>
+
+<file path=".gitignore">
+# Compiled binaries
+*.exe
+*.o
+*.out
+a.out
+
+# Build directories
+build/
+bin/
+
+# IDE files
+.vscode/
+.idea/
+*.user
+
+# OS files
+.DS_Store
+Thumbs.db
+.gradle/
+</file>
+
+<file path="README.md">
+# VectraCore — High-Performance Vector Search Engine in Java
+
+A pure-Java, zero-dependency vector search engine featuring **HNSW**, **KD-Tree**, and **Brute Force** algorithms, a built-in REST API server, a PCA scatter plot frontend, document embedding, and a full **RAG pipeline** via Ollama.
+
+---
+
+## Why VectraCore?
+
+| Feature | Detail |
+|---|---|
+| ⚡ **3 Search Algorithms** | HNSW, KD-Tree, Brute Force — benchmarkable side-by-side |
+| 🧠 **RAG Pipeline** | Ask questions over your documents via Ollama |
+| 📦 **Zero Dependencies** | Only Gson 2.10.1 — no vector library, no framework |
+| 🚀 **Single Fat JAR** | Ships as a self-contained ~326 KB executable JAR |
+| 🔒 **Thread Safe** | Synchronized index mutations + cached thread pool |
+
+---
+
+## Prerequisites
+
+| Requirement | Version |
+|---|---|
+| Java (JDK) | 17+ |
+| Ollama | any *(for document embedding & RAG)* |
+
+> **Ollama is optional** — vector search works fully offline.
+> RAG and document embedding require Ollama running locally.
+
+---
+
+## Build
+
+```bash
+cd VectraCore
+./gradlew shadowJar
+```
+
+Produces: `build/libs/VectorDB-all.jar` (self-contained fat JAR, ~326 KB)
+
+---
+
+## Run
+
+```bash
+java -jar build/libs/VectorDB-all.jar
+```
+
+Expected startup output:
+```
+=== VectraCore Engine (Java) ===
+http://localhost:8080
+20 demo vectors | 16 dims | HNSW+KD-Tree+BruteForce
+Ollama: ONLINE
+  embed model: nomic-embed-text  gen model: llama3.2
+Server started — listening on :8080
+```
+
+---
+
+## Verify
+
+Open your browser: **http://localhost:8080**
+
+Or test the API directly:
+
+```bash
+# Health check
+curl http://localhost:8080/stats
+
+# Search (cosine, HNSW, 16D vector)
+curl "http://localhost:8080/search?v=0.9,0.85,0.72,0.68,0.12,0.08,0.15,0.1,0.05,0.08,0.06,0.09,0.07,0.11,0.08,0.06&k=3&metric=cosine&algo=hnsw"
+
+# Benchmark all 3 algorithms
+curl "http://localhost:8080/benchmark?v=0.9,0.85,0.72,0.68,0.12,0.08,0.15,0.1,0.05,0.08,0.06,0.09,0.07,0.11,0.08,0.06&k=5&metric=cosine"
+
+# HNSW graph stats
+curl http://localhost:8080/hnsw-info
+
+# Ollama / model status
+curl http://localhost:8080/status
+```
+
+---
+
+## Ollama Setup (for RAG)
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull required models
+ollama pull nomic-embed-text
+ollama pull gemma4:e2b
+
+# Ollama runs automatically in the background
+```
+
+Then use the frontend at **http://localhost:8080** to insert documents and ask questions.
+
+---
+
+## API Reference
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/` | Frontend (index.html) |
+| `GET` | `/search` | k-NN search — params: `v`, `k`, `metric`, `algo` |
+| `POST` | `/insert` | Insert demo vector — body: `{metadata, category, embedding}` |
+| `DELETE` | `/delete/:id` | Remove a demo vector |
+| `GET` | `/items` | List all demo vectors |
+| `GET` | `/benchmark` | Benchmark all 3 algos — params: `v`, `k`, `metric` |
+| `GET` | `/hnsw-info` | HNSW layer statistics (nodes, edges per layer) |
+| `GET` | `/stats` | DB statistics (count, dims, algorithms, metrics) |
+| `POST` | `/doc/insert` | Insert document — body: `{title, text}` → chunk + embed + store |
+| `GET` | `/doc/list` | List stored document chunks |
+| `DELETE` | `/doc/delete/:id` | Remove a document chunk |
+| `POST` | `/doc/ask` | RAG pipeline — body: `{question, k}` |
+| `GET` | `/status` | Ollama online/offline, model names, doc/demo counts |
+
+### Search Parameters
+
+| Param | Options | Default |
+|---|---|---|
+| `metric` | `cosine` \| `euclidean` \| `manhattan` | `cosine` |
+| `algo` | `hnsw` \| `kdtree` \| `bruteforce` | `hnsw` |
+| `k` | any integer | `5` |
+
+---
+
+## Project Structure
+
+```
+VectraCore/
+├── build.gradle.kts              ← Gradle Kotlin DSL + shadowJar
+├── settings.gradle.kts
+├── gradlew / gradlew.bat
+├── gradle/wrapper/
+└── src/main/
+    ├── java/com/vectordb/
+    │   ├── VectorDB.java          ← Entry point + HTTP server + demo data
+    │   ├── algorithms/
+    │   │   ├── BruteForce.java    ← Linear scan O(n·d)
+    │   │   ├── KDTree.java        ← KD-Tree with ball-within-hyperslab pruning
+    │   │   └── HNSW.java          ← HNSW graph (M=16, ef=200)
+    │   ├── db/
+    │   │   ├── VectorStore.java   ← Unified 16D demo DB (all 3 indexes)
+    │   │   └── DocumentStore.java ← 768D Ollama embedding store
+    │   ├── ollama/
+    │   │   └── OllamaClient.java  ← java.net.http client for embed + generate
+    │   └── api/
+    │       └── Router.java        ← All REST endpoint handlers
+    └── resources/
+        └── index.html             ← Frontend with PCA scatter plot
+```
+
+---
+
+## Implementation Notes
+
+- **HTTP server** — `com.sun.net.httpserver` built into the JDK, no extra dependency
+- **Algorithms** — pure Java from scratch, no vector library
+- **HNSW** — M=16, ef_construction=200, mL = 1/ln(M), seeded RNG (42) for reproducibility
+- **Chunking** — 250-word chunks with 50-word overlap
+- **CORS** — `Access-Control-Allow-Origin: *` on every response
+- **Thread safety** — `synchronized` on all index mutations; cached thread pool for HTTP
+
+---
+
+## License
+
+MIT — free to use, modify, and distribute.
+</file>
+
+</files>

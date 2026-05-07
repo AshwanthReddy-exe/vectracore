@@ -70,7 +70,7 @@ public class DocumentStore {
             float dist = pair[0];
             int   id   = (int) pair[1];
             DocItem item = store.get(id);
-            if (item != null && dist <= 0.7f) {
+            if (item != null) {
                 out.add(new AbstractMap.SimpleEntry<>(dist, item));
             }
         }
@@ -95,5 +95,10 @@ public class DocumentStore {
 
     public int getDims() {
         return dims;
+    }
+
+    public synchronized void removeAll() {
+        List<Integer> ids = new ArrayList<>(store.keySet());
+        for (int id : ids) remove(id);
     }
 }

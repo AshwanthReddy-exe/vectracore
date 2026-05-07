@@ -64,6 +64,8 @@ public class Router {
         server.createContext("/doc/list",    this::handleDocList);
         server.createContext("/doc/delete",  this::handleDocDelete);
         server.createContext("/doc/ask",     this::handleDocAsk);
+        server.createContext("/doc/upload",     this::handleDocUpload);
+        server.createContext("/doc/delete/all", this::handleDocDeleteAll);
         server.createContext("/status",      this::handleStatus);
     }
 
@@ -489,8 +491,8 @@ public class Router {
             // Step 3: build prompt
             StringBuilder ctx = new StringBuilder();
             for (int i = 0; i < hits.size(); i++) {
-                ctx.append('[').append(i + 1).append("] ")
-                   .append(hits.get(i).getValue().title).append(":\n")
+                ctx.append('[').append(i + 1).append("] Source: ")
+                   .append(hits.get(i).getValue().title).append("\n")
                    .append(hits.get(i).getValue().text).append("\n\n");
             }
             String prompt =
@@ -543,6 +545,131 @@ public class Router {
                     + ",\"demoDims\":"         + vdb.dims
                     + ",\"demoCount\":"        + vdb.size() + "}";
         sendJson(ex, 200, json);
+    }
+
+    // ── File upload handler ──────────────────────────────────────────────
+
+    private void handleDocUpload(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendError(ex, "POST required"); return;
+        }
+
+        String contentType = ex.getRequestHeaders().getFirst("Content-Type");
+        if (contentType == null || !contentType.contains("multipart/form-data")) {
+            sendError(ex, "multipart/form-data required"); return;
+        }
+
+        String boundary = null;
+        for (String part : contentType.split(";")) {
+            part = part.trim();
+            if (part.startsWith("boundary=")) {
+                boundary = part.substring("boundary=".length()).trim();
+                break;
+            }
+        }
+        if (boundary == null) { sendError(ex, "missing boundary"); return; }
+
+        byte[] body = ex.getRequestBody().readAllBytes();
+        String bodyStr = new String(body, StandardCharsets.ISO_8859_1);
+
+        String delimiter = "--" + boundary;
+        String[] rawParts = bodyStr.split(java.util.regex.Pattern.quote(delimiter));
+
+        String title = null;
+        byte[] fileBytes = null;
+        String fileName = null;
+
+        for (String rawPart : rawParts) {
+            if (rawPart.trim().isEmpty() || rawPart.trim().equals("--")) continue;
+            int headerEnd = rawPart.indexOf("\r\n\r\n");
+            if (headerEnd < 0) continue;
+            String headers = rawPart.substring(0, headerEnd);
+            String partBodyStr = rawPart.substring(headerEnd + 4);
+            if (partBodyStr.endsWith("\r\n")) partBodyStr = partBodyStr.substring(0, partBodyStr.length() - 2);
+
+            String disposition = "";
+            for (String h : headers.split("\r\n")) {
+                if (h.toLowerCase().startsWith("content-disposition")) { disposition = h; break; }
+            }
+
+            String fieldName = extractDispositionParam(disposition, "name");
+            String fn = extractDispositionParam(disposition, "filename");
+
+            if ("title".equals(fieldName)) {
+                title = partBodyStr.trim();
+            } else if ("file".equals(fieldName) && fn != null && !fn.isEmpty()) {
+                fileName = fn;
+                fileBytes = partBodyStr.getBytes(StandardCharsets.ISO_8859_1);
+            }
+        }
+
+        if (fileBytes == null || fileName == null) {
+            sendError(ex, "no file found in upload"); return;
+        }
+        if (title == null || title.isEmpty()) title = fileName;
+
+        String ext = fileName.contains(".") ? fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase() : "";
+        String text;
+        try {
+            if ("pdf".equals(ext)) {
+                text = com.vectordb.util.FileParser.parsePdf(fileBytes);
+            } else if ("txt".equals(ext) || "md".equals(ext)) {
+                text = com.vectordb.util.FileParser.parseText(new String(fileBytes, StandardCharsets.UTF_8));
+            } else {
+                sendError(ex, "Unsupported file type. Only PDF, TXT, and MD files are accepted."); return;
+            }
+        } catch (Exception e) {
+            sendError(ex, "File parsing failed: " + e.getMessage()); return;
+        }
+
+        if (text.isBlank()) { sendError(ex, "File appears to be empty or unreadable."); return; }
+
+        List<String> chunks = OllamaClient.chunkText(text, 250, 50);
+        List<Integer> ids = new ArrayList<>();
+
+        for (int i = 0; i < chunks.size(); i++) {
+            float[] emb = ollama.embed(chunks.get(i));
+            if (emb.length == 0) {
+                sendError(ex, "Ollama unavailable. Install from https://ollama.com then run: ollama pull nomic-embed-text"); return;
+            }
+            String chunkTitle = chunks.size() > 1 ? title + " [" + (i + 1) + "/" + chunks.size() + "]" : title;
+            ids.add(docDB.insert(chunkTitle, chunks.get(i), emb));
+        }
+
+        float[] proxy = new float[vdb.dims];
+        java.util.Arrays.fill(proxy, 0.5f);
+        vdb.insert(title, "doc", proxy, VectorStore.getDistFn("cosine"));
+
+        StringBuilder sb = new StringBuilder("{\"ok\":true,\"title\":");
+        sb.append(jsonStr(title)).append(",\"chunks\":").append(chunks.size())
+          .append(",\"dims\":").append(docDB.getDims()).append('}');
+        sendJson(ex, 200, sb.toString());
+    }
+
+    private void handleDocDeleteAll(HttpExchange ex) throws IOException {
+        addCors(ex);
+        if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+            ex.sendResponseHeaders(204, -1); return;
+        }
+        docDB.removeAll();
+        vdb.removeAllByCategory("doc");
+        sendJson(ex, 200, "{\"ok\":true}");
+    }
+
+    private String extractDispositionParam(String disposition, String param) {
+        for (String part : disposition.split(";")) {
+            part = part.trim();
+            if (part.startsWith(param + "=")) {
+                String val = part.substring(param.length() + 1).trim();
+                if (val.startsWith("\"") && val.endsWith("\"")) val = val.substring(1, val.length() - 1);
+                return val;
+            }
+        }
+        return null;
     }
 
     // ── JSON string escaping ──────────────────────────────────────────────
